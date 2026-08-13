@@ -7,3 +7,7 @@ All notable changes to this project will be documented in this file. The format 
 ### Added
 
 - Phase 0 repository governance, architecture documentation, diagnostics, and validation.
+
+### Fixed
+
+- Make shell validation deterministic and enable pinned GitHub Actions workflow linting in CI.

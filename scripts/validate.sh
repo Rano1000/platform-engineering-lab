@@ -71,20 +71,63 @@ check_make() {
 }
 
 check_shell() {
-  files=$(find scripts -type f -name '*.sh' -print)
   syntax_failed=0
-  for file in $files; do sh -n "$file" || syntax_failed=1; done
-  [ "$syntax_failed" -eq 0 ] && pass 'shell syntax is valid.' || fail 'shell syntax validation failed.'
-  if has shellcheck; then shellcheck $files && pass 'shellcheck passed.' || fail 'shellcheck failed.'; else warn 'shellcheck is unavailable; syntax checks passed.'; fi
+  shellcheck_failed=0
+  for file in scripts/*.sh; do
+    if ! sh -n "$file"; then
+      syntax_failed=1
+    fi
+    if has shellcheck && ! shellcheck "$file"; then
+      shellcheck_failed=1
+    fi
+  done
+  if [ "$syntax_failed" -eq 0 ]; then
+    pass 'shell syntax is valid.'
+  else
+    fail 'shell syntax validation failed.'
+  fi
+  if has shellcheck; then
+    if [ "$shellcheck_failed" -eq 0 ]; then
+      pass 'shellcheck passed.'
+    else
+      fail 'shellcheck failed.'
+    fi
+  else
+    warn 'shellcheck is unavailable; syntax checks passed.'
+  fi
 }
 
 check_markdown() {
-  if has markdownlint-cli2; then markdownlint-cli2 '**/*.md' '#node_modules' && pass 'markdownlint passed.' || fail 'markdownlint failed.'; else warn 'markdownlint-cli2 is unavailable.'; fi
+  if has markdownlint-cli2; then
+    if markdownlint-cli2 '**/*.md' '#node_modules'; then
+      pass 'markdownlint passed.'
+    else
+      fail 'markdownlint failed.'
+    fi
+  else
+    warn 'markdownlint-cli2 is unavailable.'
+  fi
 }
 
 check_yaml() {
-  if has yamllint; then yamllint . && pass 'yamllint passed.' || fail 'yamllint failed.'; else warn 'yamllint is unavailable.'; fi
-  if has actionlint; then actionlint && pass 'actionlint passed.' || fail 'actionlint failed.'; else warn 'actionlint is unavailable.'; fi
+  if has yamllint; then
+    if yamllint .; then
+      pass 'yamllint passed.'
+    else
+      fail 'yamllint failed.'
+    fi
+  else
+    warn 'yamllint is unavailable.'
+  fi
+  if has actionlint; then
+    if actionlint; then
+      pass 'actionlint passed.'
+    else
+      fail 'actionlint failed.'
+    fi
+  else
+    warn 'actionlint is unavailable.'
+  fi
 }
 
 case "$MODE" in
