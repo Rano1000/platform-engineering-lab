@@ -1,0 +1,30 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.kubeconfig
+kubeconfig
+
+# Terraform local state and caches
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Tool and editor output
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.tmp
+.cache/
+coverage/
+dist/

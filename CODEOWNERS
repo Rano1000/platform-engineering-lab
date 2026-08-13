@@ -1,0 +1,8 @@
+# Replace this placeholder with the actual GitHub team when repository ownership is assigned.
+* @Rano1000
+
+# Security and governance changes require platform maintainer review.
+/.github/ @Rano1000
+/SECURITY.md @Rano1000
+/CODEOWNERS @Rano1000
+/docs/architecture/decisions/ @Rano1000
