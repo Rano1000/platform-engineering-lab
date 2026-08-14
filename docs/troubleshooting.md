@@ -19,3 +19,23 @@ Read [the tooling reference](reference/tooling.md) for supported validators. Loc
 ## Internal link validation fails
 
 Use repository-relative Markdown links, preserve filename case, and avoid linking to files that are planned but do not exist. External URLs are not contacted by the local link check.
+
+## Cluster creation reports an existing context
+
+The lifecycle script refuses to overwrite `kind-platform-engineering-lab` when Docker cannot discover a matching cluster. Inspect `kind get clusters`, `kubectl config get-contexts`, and Docker containers from the normal workstation shell. Do not remove the context until its ownership and any surviving cluster state are understood.
+
+## Ports 80 or 443 are occupied
+
+Inspect both host listeners and published Docker ports. On Linux, `ss -ltn` shows listeners; `docker ps` shows container mappings. Stop only the known owner or revise the architecture through an ADR. The cluster script never takes over an occupied port.
+
+## Runtime validation rejects the active context
+
+Run `kubectl config current-context`. If the intended cluster has been reviewed, select it explicitly with `kubectl config use-context kind-platform-engineering-lab`. The guard prevents validation or mutation of cloud and work clusters.
+
+## Nodes or system Pods do not become Ready
+
+Run `make cluster-status`, then inspect `kubectl describe node` and Pods in `kube-system`. Common causes include memory pressure, an incomplete node-image pull, or Docker resource limits. Preserve the failed cluster for diagnosis rather than recreating it immediately.
+
+## Networked workloads cannot connect
+
+Default-deny policies are intentional. DNS is the only initial egress allowance. Add a reviewed NetworkPolicy for each required source, destination, and port; do not remove the default-deny policy as a shortcut.

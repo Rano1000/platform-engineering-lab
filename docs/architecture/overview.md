@@ -4,7 +4,7 @@
 
 Platform Engineering Lab is a reference environment for evaluating platform contracts and operating practices. It favors transparent components and version-controlled state over opaque automation.
 
-Only the repository foundation exists today. The runtime architecture below records intended boundaries and must not be interpreted as a deployed system.
+Phase 1 defines a reproducible local Kubernetes baseline. Repository configuration exists, but cluster state must be validated independently and is not implied by this documentation.
 
 ## Planned system context
 
@@ -21,8 +21,9 @@ flowchart TB
 
 ## Architectural boundaries
 
-- **Repository foundation:** governance, decisions, documentation, diagnostics, and validation. This is the current phase.
-- **Bootstrap:** creates a local cluster and the minimum GitOps entry point. Planned.
+- **Repository foundation:** governance, decisions, documentation, diagnostics, and validation. Implemented.
+- **Kubernetes baseline:** defines a guarded three-node local cluster, namespaces, and baseline controls. Repository implementation is available; runtime state is environment-dependent.
+- **GitOps bootstrap:** installs the minimum GitOps entry point. Planned for Phase 4.
 - **Platform services:** ingress, policy, monitoring, and shared cluster capabilities. Planned.
 - **Workloads:** independently packaged applications that consume a documented platform contract. Planned.
 - **Infrastructure:** optional provisioning outside Kubernetes. Planned for a cloud extension.
@@ -43,3 +44,7 @@ Git will be the source of desired configuration. CI will validate proposed state
 - [ADR-0002: Use Helm for application packaging](decisions/0002-use-helm-for-application-packaging.md)
 - [ADR-0003: Use Argo CD for GitOps](decisions/0003-use-argo-cd-for-gitops.md)
 - [ADR-0004: Use a phased platform architecture](decisions/0004-use-a-phased-platform-architecture.md)
+- [ADR-0005: Use a three-node local cluster](decisions/0005-use-a-three-node-local-cluster.md)
+- [ADR-0006: Reserve local HTTP and HTTPS ports](decisions/0006-reserve-local-http-and-https-ports.md)
+- [ADR-0007: Isolate platform namespaces](decisions/0007-isolate-platform-namespaces.md)
+- [ADR-0008: Constrain local workload resources](decisions/0008-constrain-local-workload-resources.md)

@@ -47,8 +47,8 @@ printf '%s\n' 'Platform Engineering Lab environment doctor' 'Read-only: no softw
 command_version git 2.30 git --version
 command_version make 4.0 make --version
 command_version docker 24.0 docker --version
-command_version kubectl 1.30 kubectl version --client=true
-command_version kind 0.23 kind version
+command_version kubectl 1.34 kubectl version --client=true
+command_version kind 0.31 kind version
 command_version helm 3.14 helm version --short
 command_version terraform 1.7 terraform version
 
@@ -100,7 +100,7 @@ if command -v kubectl >/dev/null 2>&1; then
     if kubectl --request-timeout=5s get --raw=/readyz >/dev/null 2>&1; then
       pass 'Kubernetes API is reachable and ready.'
     else
-      warn "Kubernetes context '$context' is not reachable. Start the intended cluster or select a valid context; Phase 0 will not change it."
+      warn "Kubernetes context '$context' is not reachable. Start the intended cluster or select a valid context; the doctor will not change it."
     fi
   else
     warn 'No Kubernetes context is configured. This is acceptable until Phase 1.'

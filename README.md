@@ -6,7 +6,7 @@ A maintainable reference environment for designing, operating, and validating an
 
 Platform teams need a safe way to evaluate delivery standards, GitOps workflows, policy, and observability without hiding the operational details. This repository will provide that environment while keeping every capability explicit, reproducible, and reviewable.
 
-The platform itself is not implemented yet. Phase 0 establishes repository governance, architectural decisions, documentation, and read-only workstation diagnostics.
+Phase 0 established repository governance and validation. Phase 1 now defines the local Kubernetes baseline; cluster runtime state remains independently verifiable and is never inferred from repository content.
 
 ## Platform capabilities
 
@@ -39,7 +39,7 @@ Solid lines describe Phase 0. Dashed lines are planned capabilities. See the [ar
 | Area | Technology | Status |
 | --- | --- | --- |
 | Repository automation | Make and portable shell | Available in Phase 0 |
-| Local Kubernetes | kind and kubectl | Planned for Phase 1 |
+| Local Kubernetes | kind and kubectl | Phase 1 repository implementation available |
 | Packaging | Helm | Planned for Phase 2 |
 | Infrastructure | Terraform and Ansible | Reserved for later phases |
 | Continuous delivery | Argo CD | Planned for Phase 4 |
@@ -48,8 +48,8 @@ Solid lines describe Phase 0. Dashed lines are planned capabilities. See the [ar
 
 ## Roadmap
 
-1. **Repository foundation:** governance, documentation, ADRs, diagnostics, and safe validation.
-2. **Kubernetes baseline:** reproducible kind cluster and core cluster conventions.
+1. **Repository foundation:** complete—governance, documentation, ADRs, diagnostics, and safe validation.
+2. **Kubernetes baseline:** in progress—configuration and guarded automation are available; runtime validation is pending.
 3. **Golden-path workload:** reference service and Helm packaging.
 4. **Continuous integration:** workload and supply-chain validation.
 5. **GitOps:** Argo CD reconciliation and promotion.
@@ -59,15 +59,15 @@ Solid lines describe Phase 0. Dashed lines are planned capabilities. See the [ar
 
 ## Development status
 
-**Phase 0 is in progress.** Only repository-level documentation and validation are present. No Kubernetes resources, applications, or platform services have been implemented, and this project does not claim production readiness.
+**Phase 1 repository implementation is available.** It defines a three-node local kind cluster, isolated namespaces, and guarded lifecycle operations. This status does not claim that a cluster is currently running or validated. Applications and platform services remain unimplemented, and this project does not claim production readiness.
 
 ## Prerequisites
 
-Phase 0 requires Git, GNU Make, and a POSIX-like shell. The read-only doctor also examines Docker, kubectl, kind, Helm, Terraform, Ansible, host memory, and existing Kubernetes connectivity. Recommended versions are listed in the [tooling reference](docs/reference/tooling.md).
+Repository validation requires Git, GNU Make, kubectl, and a POSIX-like shell. Cluster creation additionally requires a reachable Docker runtime and stable kind v0.31.0. Supported versions are listed in the [tooling reference](docs/reference/tooling.md).
 
 ## Quick start
 
-Platform bootstrap commands will be added in Phase 1. For the current repository foundation:
+Validate the repository without changing a cluster:
 
 ```sh
 make help
@@ -76,6 +76,8 @@ make validate
 ```
 
 `make doctor` inspects the environment without installing software or changing machine or cluster state.
+
+After reviewing any existing cluster and persistent data, follow the [cluster creation tutorial](docs/tutorials/create-local-cluster.md). Cluster lifecycle commands are intentionally guarded against the wrong context and arbitrary cluster names.
 
 ## Security principles
 
@@ -91,7 +93,10 @@ See [SECURITY.md](SECURITY.md) for reporting and handling vulnerabilities.
 ## Documentation
 
 - [Architecture overview](docs/architecture/overview.md)
+- [Local Kubernetes architecture](docs/architecture/local-kubernetes.md)
 - [Architecture decisions](docs/architecture/decisions/0001-use-kind-for-local-kubernetes.md)
+- [Cluster creation tutorial](docs/tutorials/create-local-cluster.md)
+- [Cluster reference](docs/reference/cluster.md)
 - [Platform engineering concept](docs/concepts/platform-engineering.md)
 - [Tooling reference](docs/reference/tooling.md)
 - [Troubleshooting](docs/troubleshooting.md)

@@ -130,9 +130,68 @@ check_yaml() {
   fi
 }
 
+check_platform() {
+  cluster_config=platform/bootstrap/kind/cluster.yaml
+  baseline_dir=platform/baseline
+  expected_image='kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f'
+
+  control_planes=$(grep -Ec '^  - role: control-plane$' "$cluster_config")
+  workers=$(grep -Ec '^  - role: worker$' "$cluster_config")
+  pinned_images=$(grep -Ec "^    image: $expected_image$" "$cluster_config")
+  cluster_names=$(grep -Ec '^name: platform-engineering-lab$' "$cluster_config")
+  kubeadm_versions=$(grep -Ec '^        apiVersion: kubeadm\.k8s\.io/v1beta3$' "$cluster_config")
+  ingress_patches=$(grep -Fc 'node-labels: "ingress-ready=true"' "$cluster_config")
+  if [ "$control_planes" -eq 1 ] && [ "$workers" -eq 2 ] && [ "$pinned_images" -eq 3 ] && [ "$cluster_names" -eq 1 ] && [ "$kubeadm_versions" -eq 1 ] && [ "$ingress_patches" -eq 1 ]; then
+    pass 'kind configuration pins one control plane and two workers to the approved image digest.'
+  else
+    fail 'kind topology, image pin, or kubeadm patch does not match the Phase 1 design.'
+  fi
+
+  if grep -Eq '^  apiServerAddress: 127\.0\.0\.1$' "$cluster_config" &&
+     [ "$(grep -Ec '^        listenAddress: 127\.0\.0\.1$' "$cluster_config")" -eq 2 ] &&
+     grep -Eq '^        hostPort: 80$' "$cluster_config" &&
+     grep -Eq '^        hostPort: 443$' "$cluster_config"; then
+    pass 'Kubernetes API, HTTP, and HTTPS bindings are restricted to loopback.'
+  else
+    fail 'expected loopback-only API, HTTP, and HTTPS bindings are missing.'
+  fi
+
+  if kubectl kustomize "$baseline_dir" >/dev/null; then
+    pass 'Kubernetes baseline renders with kubectl kustomize.'
+  else
+    fail 'Kubernetes baseline rendering failed.'
+  fi
+
+  namespace_count=$(grep -Ec '^  name: (platform-system|platform-apps|observability|security|gitops)$' "$baseline_dir/namespaces.yaml")
+  deny_count=$(grep -Ec '^  name: default-deny$' "$baseline_dir/network-policies.yaml")
+  dns_count=$(grep -Ec '^  name: allow-dns-egress$' "$baseline_dir/network-policies.yaml")
+  if [ "$namespace_count" -eq 5 ] && [ "$deny_count" -eq 5 ] && [ "$dns_count" -eq 5 ]; then
+    pass 'all five owned namespaces have default-deny and DNS egress policies.'
+  else
+    fail 'namespace or NetworkPolicy baseline is incomplete.'
+  fi
+
+  if grep -Eq '^    requests\.storage: 20Gi$' "$baseline_dir/resource-controls.yaml" &&
+     grep -Eq '^        storage: 10Gi$' "$baseline_dir/resource-controls.yaml"; then
+    pass 'application storage requests and individual claims are bounded.'
+  else
+    fail 'application storage constraints differ from the approved local budget.'
+  fi
+
+  if has kubeconform; then
+    if kubectl kustomize "$baseline_dir" | kubeconform -kubernetes-version 1.35.0 -strict -summary; then
+      pass 'Kubernetes schemas pass kubeconform.'
+    else
+      fail 'Kubernetes schema validation failed.'
+    fi
+  else
+    warn 'kubeconform is unavailable; Kustomize rendering passed without schema validation.'
+  fi
+}
+
 case "$MODE" in
-  all) check_format; check_links; check_secrets; check_make; check_shell; check_markdown; check_yaml ;;
-  lint) check_make; check_shell; check_markdown; check_yaml ;;
+  all) check_format; check_links; check_secrets; check_make; check_shell; check_markdown; check_yaml; check_platform ;;
+  lint) check_make; check_shell; check_markdown; check_yaml; check_platform ;;
   docs) check_markdown; check_links ;;
   *) printf 'usage: %s {all|lint|docs}\n' "$0" >&2; exit 2 ;;
 esac

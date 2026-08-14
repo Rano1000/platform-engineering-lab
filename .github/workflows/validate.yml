@@ -24,6 +24,7 @@ jobs:
           python3 -m pip install --disable-pip-version-check yamllint==1.37.1
           npm install --global markdownlint-cli2@0.18.1
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Validate repository

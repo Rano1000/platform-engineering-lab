@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: application-defaults
+  namespace: platform-apps
+  labels:
+    app.kubernetes.io/managed-by: platform-engineering-lab
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      default:
+        cpu: 500m
+        memory: 512Mi
+    - type: PersistentVolumeClaim
+      max:
+        storage: 10Gi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: application-budget
+  namespace: platform-apps
+  labels:
+    app.kubernetes.io/managed-by: platform-engineering-lab
+spec:
+  hard:
+    pods: "15"
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 3Gi
+    persistentvolumeclaims: "5"
+    requests.storage: 20Gi
