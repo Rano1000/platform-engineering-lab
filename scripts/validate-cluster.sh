@@ -2,7 +2,7 @@
 set -u
 
 SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd)
-# shellcheck source=scripts/lib/cluster-common.sh
+# shellcheck source=SCRIPTDIR/lib/cluster-common.sh
 . "$SCRIPT_DIR/lib/cluster-common.sh"
 
 PASS_COUNT=0

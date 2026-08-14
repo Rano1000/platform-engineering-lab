@@ -77,7 +77,7 @@ check_shell() {
     if ! sh -n "$file"; then
       syntax_failed=1
     fi
-    if has shellcheck && ! shellcheck "$file"; then
+    if has shellcheck && ! shellcheck -x "$file"; then
       shellcheck_failed=1
     fi
   done
