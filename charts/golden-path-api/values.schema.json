@@ -112,8 +112,9 @@
     "startupProbe": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["failureThreshold", "periodSeconds"],
+      "required": ["initialDelaySeconds", "failureThreshold", "periodSeconds"],
       "properties": {
+        "initialDelaySeconds": {"type": "integer", "minimum": 1, "maximum": 10},
         "failureThreshold": {"type": "integer", "minimum": 1, "maximum": 60},
         "periodSeconds": {"type": "integer", "minimum": 1, "maximum": 10}
       }

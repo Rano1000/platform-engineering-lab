@@ -66,6 +66,7 @@ spec:
             httpGet:
               path: /health/live
               port: http
+            initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}
             failureThreshold: {{ .Values.probes.startup.failureThreshold }}
             periodSeconds: {{ .Values.probes.startup.periodSeconds }}
           readinessProbe:

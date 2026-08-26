@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Validate scalar EndpointSlice readiness, use authorized in-cluster clients, and secure temporary network-test Pods.
+- Delay the startup probe until the application has had time to bind its listening socket.
 - Validate Traefik's digest-only runtime image reference and disable unnecessary outbound version checks.
 - Record the complete Git commit in OCI revision metadata while retaining readable 12-character image tags.
 - Restrict public routing to the exact root path and verify pinned Gateway artifacts before installation.

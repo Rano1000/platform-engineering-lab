@@ -77,14 +77,18 @@ network_test() {
   cleanup() {
     kubectl_lab delete pod "$allowed" "$denied" --namespace observability --ignore-not-found --wait=false >/dev/null 2>&1 || true
   }
+  pod_overrides() {
+    printf '{"spec":{"automountServiceAccountToken":false,"securityContext":{"runAsNonRoot":true,"runAsUser":10001,"runAsGroup":10001,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"%s","image":"%s","command":["python","-c"],"args":["%s"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}}]}}' "$1" "$reference" "$2"
+  }
   trap cleanup EXIT HUP INT TERM
   printf '%s\n' 'This test creates two uniquely named temporary Pods in observability, verifies one allowed and one denied connection, and removes both.'
+  allowed_command="import urllib.request; data=urllib.request.urlopen('http://$APP_SERVICE.$APP_NAMESPACE.svc:80/metrics', timeout=5).read(); assert b'golden_path_http_requests_total' in data"
   kubectl_lab run "$allowed" --namespace observability --restart=Never --image="$reference" \
-    --labels='platform.engineering-lab/purpose=metrics-test' --command -- \
-    python -c "import urllib.request; data=urllib.request.urlopen('http://$APP_SERVICE.$APP_NAMESPACE.svc:80/metrics', timeout=5).read(); assert b'golden_path_http_requests_total' in data"
+    --labels='platform.engineering-lab/purpose=metrics-test' --overrides="$(pod_overrides "$allowed" "$allowed_command")"
   kubectl_lab wait --namespace observability --for=jsonpath='{.status.phase}'=Succeeded "pod/$allowed" --timeout=30s
-  kubectl_lab run "$denied" --namespace observability --restart=Never --image="$reference" --command -- \
-    python -c "import urllib.request; urllib.request.urlopen('http://$APP_SERVICE.$APP_NAMESPACE.svc:80/metrics', timeout=5)"
+  denied_command="import urllib.request; urllib.request.urlopen('http://$APP_SERVICE.$APP_NAMESPACE.svc:80/metrics', timeout=5)"
+  kubectl_lab run "$denied" --namespace observability --restart=Never --image="$reference" \
+    --overrides="$(pod_overrides "$denied" "$denied_command")"
   if kubectl_lab wait --namespace observability --for=jsonpath='{.status.phase}'=Succeeded "pod/$denied" --timeout=15s >/dev/null 2>&1; then
     die 'Unapproved metrics traffic unexpectedly succeeded.'
   fi

@@ -23,6 +23,7 @@ gateway:
 
 probes:
   startup:
+    initialDelaySeconds: 2
     failureThreshold: 30
     periodSeconds: 2
   readiness:
