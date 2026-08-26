@@ -1,0 +1,4 @@
+Golden Path API is configured for {{ .Values.gateway.hostname }}.
+
+The local image must be loaded into kind before deployment. The chart deliberately
+uses imagePullPolicy Never and does not expose /metrics through the HTTPRoute.

@@ -1,5 +1,21 @@
 # Troubleshooting
 
+## Application image is not found
+
+The chart deliberately uses `imagePullPolicy: Never`. Run `make app-build` from committed sources and `make app-load` before deployment. Confirm that the tag contains the first 12 characters of the current Git revision and the OCI revision label contains all 40; never substitute `latest`.
+
+## HTTPRoute is not accepted
+
+Confirm the Gateway API Standard CRDs are v1.6.1, the `platform-traefik` GatewayClass is Accepted, and `platform-system/platform-gateway` is Programmed. The Gateway accepts routes only from `platform-apps`.
+
+## Traefik NodePorts do not receive localhost traffic
+
+Confirm the Traefik Service owns NodePorts 30080 and 30443 and uses `externalTrafficPolicy: Local`. The Traefik Pod must run on the ingress-ready control-plane. Docker must publish `127.0.0.1:80` to container port 30080 and `127.0.0.1:443` to container port 30443. If the cluster predates this mapping, preserve and inventory it; kind mappings are immutable, so correction requires one separately approved recreation after the repository change is reviewed and committed.
+
+## HPA is absent
+
+This is expected in Phase 2. The chart validates its HPA template statically, but autoscaling defaults off because Metrics Server is not installed.
+
 ## Doctor reports Docker connectivity failure
 
 Confirm the Docker service or Docker Desktop is running, then run `docker info`. On Linux, verify that your user is authorized to access the configured Docker socket. Do not change socket permissions broadly; use the operating system's documented Docker group or rootless setup.

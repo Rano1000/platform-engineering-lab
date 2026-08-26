@@ -1,0 +1,9 @@
+apiVersion: v2
+name: golden-path-api
+description: Golden-path reference API for the Platform Engineering Lab
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.35.0-0 <1.36.0-0"
+annotations:
+  artifacthub.io/license: Apache-2.0

@@ -12,10 +12,12 @@
 | IP family | IPv4 |
 | Pod subnet | `10.244.0.0/16` |
 | Service subnet | `10.96.0.0/16` |
-| HTTP | `127.0.0.1:80` |
-| HTTPS | `127.0.0.1:443` |
+| HTTP | `127.0.0.1:80` → control-plane `30080` |
+| HTTPS | `127.0.0.1:443` → control-plane `30443` |
 
 The node image tag and SHA-256 digest are pinned in `platform/bootstrap/kind/cluster.yaml`. Upgrade kind and Kubernetes together by selecting an image listed in the target stable kind release, updating the version constants and Pod Security version labels, recreating the disposable cluster, and running all static and runtime validation.
+
+The internal ports are fixed Kubernetes NodePorts used by the planned Traefik Service. The host remains exposed only on loopback at conventional ports 80 and 443. kind port mappings are immutable after cluster creation, so adopting this Phase 2 mapping requires one separately reviewed and approved cluster recreation after the repository change is committed.
 
 kind v0.31.0 generates kubeadm v1beta3 configuration for Kubernetes 1.35.x, so the ingress node-label patch deliberately uses `kubeadm.k8s.io/v1beta3` and its map-form `kubeletExtraArgs`. kind changes its generated configuration to v1beta4 for Kubernetes 1.36+, where the equivalent arguments use `name` and `value` entries. A Kubernetes upgrade across that boundary must update the patch structure in the same change.
 

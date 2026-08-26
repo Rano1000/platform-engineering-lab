@@ -149,9 +149,11 @@ check_platform() {
 
   if grep -Eq '^  apiServerAddress: 127\.0\.0\.1$' "$cluster_config" &&
      [ "$(grep -Ec '^        listenAddress: 127\.0\.0\.1$' "$cluster_config")" -eq 2 ] &&
+     grep -Eq '^      - containerPort: 30080$' "$cluster_config" &&
      grep -Eq '^        hostPort: 80$' "$cluster_config" &&
+     grep -Eq '^      - containerPort: 30443$' "$cluster_config" &&
      grep -Eq '^        hostPort: 443$' "$cluster_config"; then
-    pass 'Kubernetes API, HTTP, and HTTPS bindings are restricted to loopback.'
+    pass 'API and HTTP(S) NodePort mappings are pinned to loopback.'
   else
     fail 'expected loopback-only API, HTTP, and HTTPS bindings are missing.'
   fi
@@ -189,9 +191,201 @@ check_platform() {
   fi
 }
 
+check_application() {
+  chart=charts/golden-path-api
+  application=applications/golden-path-api
+  gateway=platform/addons/traefik-gateway
+  static_revision=0123456789abcdef0123456789abcdef01234567
+  static_tag=0.1.0-0123456789ab
+
+  if python3 - "$application/src" "$application/tests" <<'PY'
+import ast
+import pathlib
+import sys
+for root in sys.argv[1:]:
+    for source in pathlib.Path(root).rglob("*.py"):
+        ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+PY
+  then
+    pass 'Python application and tests compile.'
+  else
+    fail 'Python application syntax validation failed.'
+  fi
+
+  if grep -Eq '^ARG PYTHON_IMAGE=python:3\.13\.15-slim-trixie@sha256:[0-9a-f]{64}$' "$application/Dockerfile" &&
+     grep -Eq '^USER 10001:10001$' "$application/Dockerfile" &&
+     grep -Fq "revision=\$(full_revision)" scripts/app.sh &&
+     grep -Fq -- "--set-string \"image.revision=\$(full_revision)\"" scripts/app.sh &&
+     ! grep -Eiq '(^|[^[:alnum:]])latest([^[:alnum:]]|$)' "$application/Dockerfile" "$chart/values.yaml" &&
+     python3 - "$application/requirements/runtime.txt" "$application/requirements/test.txt" <<'PY'
+import pathlib
+import re
+import sys
+
+invalid = []
+for name in sys.argv[1:]:
+    for number, raw in enumerate(pathlib.Path(name).read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("-r "):
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+==[A-Za-z0-9_.+!-]+", line):
+            invalid.append(f"{name}:{number}: {line}")
+if invalid:
+    print("\n".join(invalid))
+    raise SystemExit(1)
+PY
+  then
+    pass 'application image and dependencies are pinned, non-root, revision-labelled, and never use latest.'
+  else
+    fail 'application image pin or non-root runtime contract is incomplete.'
+  fi
+
+  if has helm; then
+    if helm lint "$chart" --kube-version 1.35.0 --set-string "image.tag=$static_tag" --set-string "image.revision=$static_revision" >/dev/null &&
+       helm template golden-path "$chart" --kube-version 1.35.0 --namespace platform-apps --set-string "image.tag=$static_tag" --set-string "image.revision=$static_revision" >"${TMPDIR:-/tmp}/golden-path-rendered.yaml" &&
+       helm template golden-path "$chart" --kube-version 1.35.0 --namespace platform-apps --set autoscaling.enabled=true --set-string "image.tag=$static_tag" --set-string "image.revision=$static_revision" >"${TMPDIR:-/tmp}/golden-path-hpa-rendered.yaml"; then
+      pass 'Helm chart lints and renders normal and HPA variants.'
+    else
+      fail 'Helm chart linting or rendering failed.'
+      return
+    fi
+  else
+    warn 'helm is unavailable; application chart rendering was not validated.'
+    return
+  fi
+
+  rendered=${TMPDIR:-/tmp}/golden-path-rendered.yaml
+  hpa_rendered=${TMPDIR:-/tmp}/golden-path-hpa-rendered.yaml
+
+  if python3 - "$rendered" "$hpa_rendered" <<'PY'
+import sys
+import yaml
+
+errors = []
+for path in sys.argv[1:]:
+    for document in yaml.safe_load_all(open(path, encoding="utf-8")):
+        if not isinstance(document, dict):
+            continue
+        kind = document.get("kind")
+        if kind not in {"Deployment", "DaemonSet", "StatefulSet", "Job", "Pod"}:
+            continue
+        spec = document.get("spec", {})
+        if kind != "Pod":
+            spec = spec.get("template", {}).get("spec", {})
+        if spec.get("hostNetwork") is True:
+            errors.append(f"{path}: {kind} declares hostNetwork: true")
+        for container_type in ("containers", "initContainers", "ephemeralContainers"):
+            for container in spec.get(container_type, []) or []:
+                for port in container.get("ports", []) or []:
+                    if int(port.get("hostPort", 0) or 0) != 0:
+                        errors.append(f"{path}: {kind} declares non-zero hostPort")
+if errors:
+    print("\n".join(errors))
+    raise SystemExit(1)
+PY
+  then
+    pass 'rendered application Pod specifications avoid host networking and host ports.'
+  else
+    fail 'rendered application Pod specifications use forbidden host networking or host ports.'
+  fi
+
+  if python3 - "$rendered" <<'PY'
+import sys
+import yaml
+
+routes = [doc for doc in yaml.safe_load_all(open(sys.argv[1], encoding="utf-8"))
+          if isinstance(doc, dict) and doc.get("kind") == "HTTPRoute"]
+if len(routes) != 1:
+    raise SystemExit(f"expected one HTTPRoute, found {len(routes)}")
+rules = routes[0].get("spec", {}).get("rules", [])
+matches = [match for rule in rules for match in rule.get("matches", [])]
+expected = [{"path": {"type": "Exact", "value": "/"}}]
+if matches != expected:
+    raise SystemExit(f"public route matches differ from exact root: {matches!r}")
+PY
+  then
+    pass 'HTTPRoute exposes only the exact root path.'
+  else
+    fail 'HTTPRoute must expose exactly / and no internal endpoint prefix.'
+  fi
+
+  if python3 - "$rendered" <<'PY'
+import sys
+import yaml
+
+policies = [doc for doc in yaml.safe_load_all(open(sys.argv[1], encoding="utf-8"))
+            if isinstance(doc, dict) and doc.get("kind") == "NetworkPolicy"]
+ingress = next((doc for doc in policies if doc["metadata"]["name"].endswith("-allow-approved-ingress")), None)
+egress = next((doc for doc in policies if doc["metadata"]["name"].endswith("-metrics-test-egress")), None)
+if ingress is None or egress is None:
+    raise SystemExit("expected application ingress and metrics-test egress policies")
+ingress_rules = ingress.get("spec", {}).get("ingress", [])
+egress_rules = egress.get("spec", {}).get("egress", [])
+if len(ingress_rules) != 2 or any("from" not in rule or "to" in rule for rule in ingress_rules):
+    raise SystemExit(f"unexpected application ingress rules: {ingress_rules!r}")
+if len(egress_rules) != 1 or "to" not in egress_rules[0] or "from" in egress_rules[0]:
+    raise SystemExit(f"unexpected metrics-test egress rules: {egress_rules!r}")
+for rule in ingress_rules + egress_rules:
+    if rule.get("ports") != [{"protocol": "TCP", "port": 8080}]:
+        raise SystemExit(f"unexpected application policy port: {rule.get('ports')!r}")
+PY
+  then
+    pass 'application and metrics-test NetworkPolicy directions are structurally correct.'
+  else
+    fail 'application or metrics-test NetworkPolicy direction is incorrect.'
+  fi
+  if grep -q '^kind: HorizontalPodAutoscaler$' "$hpa_rendered" && ! grep -q '^kind: HorizontalPodAutoscaler$' "$rendered"; then
+    pass 'HPA renders only when autoscaling is explicitly enabled.'
+  else
+    fail 'HPA enablement does not match the disabled-by-default contract.'
+  fi
+
+  if grep -q 'runAsUser: 10001' "$rendered" &&
+     grep -q 'readOnlyRootFilesystem: true' "$rendered" &&
+     grep -q 'type: RuntimeDefault' "$rendered" &&
+     grep -q 'whenUnsatisfiable: ScheduleAnyway' "$rendered" &&
+     grep -q 'automountServiceAccountToken: false' "$rendered"; then
+    pass 'rendered workload matches the restricted Pod security contract.'
+  else
+    fail 'rendered workload security or scheduling contract is incomplete.'
+  fi
+
+  if grep -q '^TRAEFIK_VERSION=v3.7.10$' scripts/lib/app-common.sh &&
+     grep -q '^TRAEFIK_CHART_VERSION=41.2.0$' scripts/lib/app-common.sh &&
+     grep -q '^TRAEFIK_CHART_DIGEST=sha256:5d1a255b73e5dd67d70fc21b1536a405d88bf6b63896bc78dbefa15e9bfb371b$' scripts/lib/app-common.sh &&
+     grep -q '^TRAEFIK_CHART_ARCHIVE_SHA256=f7f8b70f021f34164709bc6440165c0ccb79073dccb6369310d95a1c3cf8a2f0$' scripts/lib/app-common.sh &&
+     grep -q '^GATEWAY_API_VERSION=v1.6.1$' scripts/lib/app-common.sh &&
+     grep -q '^GATEWAY_API_SHA256=24d931f22abd8e40c973264319ead7cfa09d0fb7716b7ab1ee2ff174cb063a73$' scripts/lib/app-common.sh &&
+     grep -q '^  digest: sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac$' "$gateway/values.yaml" &&
+     grep -q 'kubernetesGateway:' "$gateway/values.yaml" &&
+     grep -q 'kubernetesIngress:' "$gateway/values.yaml" &&
+     grep -q '^    type: NodePort$' "$gateway/values.yaml" &&
+     grep -q '^    externalTrafficPolicy: Local$' "$gateway/values.yaml" &&
+     grep -q '^    nodePort: 30080$' "$gateway/values.yaml" &&
+     grep -q '^    nodePort: 30443$' "$gateway/values.yaml" &&
+     grep -q '^  name: platform-traefik$' "$gateway/gateway.yaml" &&
+     grep -q '^  gatewayClassName: platform-traefik$' "$gateway/gateway.yaml" &&
+     grep -q '^  controllerName: traefik.io/gateway-controller$' "$gateway/gateway.yaml" &&
+     ! grep -Eq '^[[:space:]]*hostPort:|^[[:space:]]*hostNetwork:[[:space:]]*true' "$gateway/values.yaml"; then
+    pass 'Traefik versions, providers, fixed NodePorts, and Pod networking controls are pinned.'
+  else
+    fail 'Traefik version, provider, NodePort, or Pod networking controls are incomplete.'
+  fi
+
+  if has kubeconform; then
+    if kubeconform -kubernetes-version 1.35.0 -strict -ignore-missing-schemas -summary "$rendered" "$hpa_rendered" "$gateway/gateway.yaml" "$gateway/network-policies.yaml"; then
+      pass 'application and Gateway manifests pass available Kubernetes schema validation.'
+    else
+      fail 'application or Gateway schema validation failed.'
+    fi
+  else
+    warn 'kubeconform is unavailable; Helm rendering passed without schema validation.'
+  fi
+}
+
 case "$MODE" in
-  all) check_format; check_links; check_secrets; check_make; check_shell; check_markdown; check_yaml; check_platform ;;
-  lint) check_make; check_shell; check_markdown; check_yaml; check_platform ;;
+  all) check_format; check_links; check_secrets; check_make; check_shell; check_markdown; check_yaml; check_platform; check_application ;;
+  lint) check_make; check_shell; check_markdown; check_yaml; check_platform; check_application ;;
   docs) check_markdown; check_links ;;
   *) printf 'usage: %s {all|lint|docs}\n' "$0" >&2; exit 2 ;;
 esac

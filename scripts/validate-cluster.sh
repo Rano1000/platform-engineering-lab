@@ -101,15 +101,15 @@ else
 fi
 
 if docker inspect "$CONTROL_PLANE_CONTAINER" >/dev/null 2>&1; then
-  http_binding=$(docker port "$CONTROL_PLANE_CONTAINER" 80/tcp 2>/dev/null || true)
-  https_binding=$(docker port "$CONTROL_PLANE_CONTAINER" 443/tcp 2>/dev/null || true)
+  http_binding=$(docker port "$CONTROL_PLANE_CONTAINER" 30080/tcp 2>/dev/null || true)
+  https_binding=$(docker port "$CONTROL_PLANE_CONTAINER" 30443/tcp 2>/dev/null || true)
   if [ "$http_binding" = '127.0.0.1:80' ]; then
-    pass 'HTTP is reserved on 127.0.0.1:80.'
+    pass 'HTTP maps from 127.0.0.1:80 to control-plane container port 30080.'
   else
     fail "unexpected HTTP binding: ${http_binding:-none}."
   fi
   if [ "$https_binding" = '127.0.0.1:443' ]; then
-    pass 'HTTPS is reserved on 127.0.0.1:443.'
+    pass 'HTTPS maps from 127.0.0.1:443 to control-plane container port 30443.'
   else
     fail "unexpected HTTPS binding: ${https_binding:-none}."
   fi

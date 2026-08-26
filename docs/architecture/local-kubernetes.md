@@ -7,7 +7,7 @@ The Phase 1 cluster provides a reproducible Kubernetes baseline for local platfo
 ```mermaid
 flowchart TB
     Operator[Operator] -->|kubectl using exact context| API[API server on loopback]
-    Browser[Local HTTP client] -. future ingress .-> Ports[127.0.0.1 ports 80 and 443]
+    Browser[Local HTTP client] -. repository-defined Gateway .-> Ports[127.0.0.1 ports 80 and 443]
 
     subgraph Host[Single developer workstation]
         subgraph Docker[Docker runtime]
@@ -17,7 +17,7 @@ flowchart TB
             CP --- W1
             CP --- W2
         end
-        Ports --> CP
+        Ports -->|30080 and 30443| CP
         API --> CP
     end
 
@@ -34,9 +34,9 @@ All nodes are containers on one workstation. They share the host's CPU, memory, 
 
 ## Network boundaries
 
-The API server, HTTP, and HTTPS mappings bind only to `127.0.0.1`. The cluster uses IPv4, Pod subnet `10.244.0.0/16`, and Service subnet `10.96.0.0/16`.
+The API server, HTTP, and HTTPS mappings bind only to `127.0.0.1`. Docker maps host ports 80 and 443 to control-plane container ports 30080 and 30443. Those internal ports are reserved for Traefik's fixed NodePort Service; the user-facing localhost addresses do not change. The cluster uses IPv4, Pod subnet `10.244.0.0/16`, and Service subnet `10.96.0.0/16`.
 
-The control-plane node carries `ingress-ready=true`, which is the scheduling label planned for ingress-nginx. Phase 1 reserves ports but does not install ingress.
+The control-plane node carries `ingress-ready=true`, which is the scheduling label used by the planned Traefik Gateway controller. Phase 1 reserves ports but does not install a Gateway controller. Because kind port mappings cannot be changed on a running cluster, the existing cluster requires one separately approved recreation after repository review and commit.
 
 Owned namespaces begin with default-deny ingress and egress. DNS queries to CoreDNS over TCP and UDP port 53 are the only initial exception. Later components must add narrowly scoped rules for application ingress, metrics collection, Git access, Kubernetes API access, and approved service dependencies.
 

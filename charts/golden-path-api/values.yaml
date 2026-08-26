@@ -1,0 +1,55 @@
+replicaCount: 2
+
+image:
+  repository: golden-path-api
+  tag: ""
+  revision: ""
+  pullPolicy: Never
+
+config:
+  environment: local
+  logLevel: INFO
+
+service:
+  port: 80
+  targetPort: 8080
+
+gateway:
+  enabled: true
+  name: platform-gateway
+  namespace: platform-system
+  sectionName: web
+  hostname: golden-path-api.localhost
+
+probes:
+  startup:
+    failureThreshold: 30
+    periodSeconds: 2
+  readiness:
+    periodSeconds: 5
+    timeoutSeconds: 2
+  liveness:
+    periodSeconds: 10
+    timeoutSeconds: 2
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 128Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  minAvailable: 1
+
+metricsTest:
+  namespace: observability
+  podLabels:
+    platform.engineering-lab/purpose: metrics-test

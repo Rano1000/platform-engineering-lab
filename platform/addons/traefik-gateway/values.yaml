@@ -1,0 +1,110 @@
+image:
+  tag: v3.7.10
+  digest: sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac
+  pullPolicy: IfNotPresent
+
+versionOverride: v3.7.10
+
+deployment:
+  replicas: 1
+
+ingressClass:
+  enabled: false
+
+providers:
+  kubernetesCRD:
+    enabled: false
+  kubernetesIngress:
+    enabled: false
+  kubernetesGateway:
+    enabled: true
+    experimentalChannel: false
+    namespaces:
+      - platform-system
+      - platform-apps
+    labelSelector: platform.engineering-lab/gateway=platform
+  file:
+    enabled: false
+
+gatewayClass:
+  enabled: false
+
+gateway:
+  enabled: false
+
+api:
+  dashboard: false
+  insecure: false
+  debug: false
+
+ingressRoute:
+  dashboard:
+    enabled: false
+  healthcheck:
+    enabled: false
+
+ports:
+  web:
+    port: 8000
+    expose:
+      default: true
+    exposedPort: 80
+    nodePort: 30080
+    protocol: TCP
+  websecure:
+    port: 8443
+    expose:
+      default: true
+    exposedPort: 443
+    nodePort: 30443
+    protocol: TCP
+
+service:
+  spec:
+    type: NodePort
+    externalTrafficPolicy: Local
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi
+
+nodeSelector:
+  ingress-ready: "true"
+
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true
+
+podSecurityContext:
+  runAsGroup: 65532
+  runAsNonRoot: true
+  runAsUser: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+log:
+  format: json
+  level: INFO
+
+accessLog:
+  enabled: true
+  format: json
+
+metrics:
+  prometheus: null
+
+persistence:
+  enabled: false
+
+hostNetwork: false

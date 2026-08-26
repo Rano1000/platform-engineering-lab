@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["replicaCount", "image", "config", "service", "gateway", "probes", "resources", "autoscaling", "podDisruptionBudget", "metricsTest"],
+  "properties": {
+    "replicaCount": {"type": "integer", "minimum": 2, "maximum": 4},
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "tag", "revision", "pullPolicy"],
+      "properties": {
+        "repository": {"type": "string", "minLength": 1},
+        "tag": {"type": "string", "pattern": "^0\\.1\\.0-[0-9a-f]{12}$"},
+        "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "pullPolicy": {"type": "string", "const": "Never"}
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "logLevel"],
+      "properties": {
+        "environment": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+        "logLevel": {"type": "string", "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]}
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["port", "targetPort"],
+      "properties": {
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "targetPort": {"type": "integer", "const": 8080}
+      }
+    },
+    "gateway": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "name", "namespace", "sectionName", "hostname"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "name": {"type": "string", "minLength": 1},
+        "namespace": {"type": "string", "const": "platform-system"},
+        "sectionName": {"type": "string", "const": "web"},
+        "hostname": {"type": "string", "const": "golden-path-api.localhost"}
+      }
+    },
+    "probes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startup", "readiness", "liveness"],
+      "properties": {
+        "startup": {"$ref": "#/$defs/startupProbe"},
+        "readiness": {"$ref": "#/$defs/httpProbe"},
+        "liveness": {"$ref": "#/$defs/httpProbe"}
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requests", "limits"],
+      "properties": {
+        "requests": {"$ref": "#/$defs/resourcePair"},
+        "limits": {"$ref": "#/$defs/resourcePair"}
+      }
+    },
+    "autoscaling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "minReplicas", "maxReplicas", "targetCPUUtilizationPercentage"],
+      "properties": {
+        "enabled": {"type": "boolean", "default": false},
+        "minReplicas": {"type": "integer", "minimum": 2},
+        "maxReplicas": {"type": "integer", "minimum": 2, "maximum": 4},
+        "targetCPUUtilizationPercentage": {"type": "integer", "minimum": 1, "maximum": 100}
+      }
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minAvailable"],
+      "properties": {"minAvailable": {"type": "integer", "const": 1}}
+    },
+    "metricsTest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "podLabels"],
+      "properties": {
+        "namespace": {"type": "string", "const": "observability"},
+        "podLabels": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["platform.engineering-lab/purpose"],
+          "properties": {
+            "platform.engineering-lab/purpose": {"type": "string", "const": "metrics-test"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "httpProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["periodSeconds", "timeoutSeconds"],
+      "properties": {
+        "periodSeconds": {"type": "integer", "minimum": 1, "maximum": 60},
+        "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 10}
+      }
+    },
+    "startupProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failureThreshold", "periodSeconds"],
+      "properties": {
+        "failureThreshold": {"type": "integer", "minimum": 1, "maximum": 60},
+        "periodSeconds": {"type": "integer", "minimum": 1, "maximum": 10}
+      }
+    },
+    "resourcePair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpu", "memory"],
+      "properties": {
+        "cpu": {"type": "string", "pattern": "^[1-9][0-9]*m$"},
+        "memory": {"type": "string", "pattern": "^[1-9][0-9]*Mi$"}
+      }
+    }
+  }
+}

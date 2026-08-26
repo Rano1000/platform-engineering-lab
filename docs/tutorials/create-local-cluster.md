@@ -15,6 +15,8 @@ make validate
 
 The host must have ports 80 and 443 available on `127.0.0.1`. Three nodes require roughly 2.5–4 GiB before application and platform workloads are added; 8 GiB host memory is recommended.
 
+The configuration maps those host ports to control-plane container ports 30080 and 30443 for the future Traefik NodePort Service. Local URLs remain unchanged. kind cannot update port mappings in place, so an existing cluster must be inventoried and recreated once after this repository change has been reviewed and committed. Recreation requires separate approval.
+
 ## Protect an existing cluster
 
 If `kind-platform-engineering-lab` already exists, inspect it before replacement:
@@ -36,7 +38,7 @@ When no cluster or conflicting context exists:
 make cluster-create
 ```
 
-The command checks Docker, kind, the target identity, kubeconfig, and host ports before creating anything. It waits for nodes and system Pods, then applies the namespace baseline declaratively.
+The command checks Docker, kind, the target identity, kubeconfig, and host ports before creating anything. It waits for nodes and system Pods, then applies the namespace baseline declaratively. It does not install Traefik or claim the reserved NodePorts.
 
 ## Validate the result
 

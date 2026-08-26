@@ -6,7 +6,7 @@ A maintainable reference environment for designing, operating, and validating an
 
 Platform teams need a safe way to evaluate delivery standards, GitOps workflows, policy, and observability without hiding the operational details. This repository will provide that environment while keeping every capability explicit, reproducible, and reviewable.
 
-Phase 0 established repository governance and validation. Phase 1 now defines the local Kubernetes baseline; cluster runtime state remains independently verifiable and is never inferred from repository content.
+Phase 0 established repository governance and validation. Phase 1 defines the local Kubernetes baseline. Phase 2 now defines a reference API, secure image contract, Helm packaging, and Gateway API configuration; runtime state remains independently verifiable and is never inferred from repository content.
 
 ## Platform capabilities
 
@@ -26,13 +26,16 @@ The following capabilities are planned and will be delivered incrementally:
 flowchart LR
     Developer[Developer] --> Git[Git repository]
     Git --> CI[Safe validation]
+    Developer --> Build[Revision-labelled image build]
+    Build --> Kind[kind image load]
     Git -. planned .-> Argo[Argo CD]
-    Argo -. planned reconciliation .-> Cluster[kind cluster]
-    Cluster -. planned .-> Apps[Platform workloads]
-    Cluster -. planned .-> Controls[Policy and observability]
+    Argo -. planned reconciliation .-> Kind
+    Kind --> Gateway[Traefik Gateway API]
+    Gateway --> App[Golden-path API]
+    Kind -. planned .-> Observability[Observability stack]
 ```
 
-Solid lines describe Phase 0. Dashed lines are planned capabilities. See the [architecture overview](docs/architecture/overview.md) for boundaries and ownership.
+Solid lines describe implemented repository workflows; they do not claim that runtime components are installed. Dashed lines are planned capabilities. See the [architecture overview](docs/architecture/overview.md) for boundaries and ownership.
 
 ## Technology stack
 
@@ -40,7 +43,8 @@ Solid lines describe Phase 0. Dashed lines are planned capabilities. See the [ar
 | --- | --- | --- |
 | Repository automation | Make and portable shell | Available in Phase 0 |
 | Local Kubernetes | kind and kubectl | Phase 1 repository implementation available |
-| Packaging | Helm | Planned for Phase 2 |
+| Packaging | Helm | Phase 2 repository implementation available |
+| Local routing | Traefik and Gateway API | Phase 2 repository implementation available |
 | Infrastructure | Terraform and Ansible | Reserved for later phases |
 | Continuous delivery | Argo CD | Planned for Phase 4 |
 | Policy | Kyverno | Planned for Phase 6 |
@@ -48,18 +52,18 @@ Solid lines describe Phase 0. Dashed lines are planned capabilities. See the [ar
 
 ## Roadmap
 
-1. **Repository foundation:** complete—governance, documentation, ADRs, diagnostics, and safe validation.
-2. **Kubernetes baseline:** in progress—configuration and guarded automation are available; runtime validation is pending.
-3. **Golden-path workload:** reference service and Helm packaging.
-4. **Continuous integration:** workload and supply-chain validation.
-5. **GitOps:** Argo CD reconciliation and promotion.
-6. **Observability and reliability:** metrics, dashboards, alerts, and failure exercises.
-7. **Policy and security:** admission controls, isolation, and workload standards.
-8. **Self-service and cloud extensions:** templates, optional portal, and managed infrastructure.
+0. **Repository foundation:** complete—governance, documentation, ADRs, diagnostics, and safe validation.
+1. **Kubernetes baseline:** complete—three-node kind cluster, guarded lifecycle, isolation, and runtime validation.
+2. **Golden-path workload:** repository implementation available—reference API, secure container, Helm chart, and Gateway API configuration; runtime deployment pending approval.
+3. **Continuous integration:** planned workload and supply-chain validation.
+4. **GitOps:** planned Argo CD reconciliation and promotion.
+5. **Observability and reliability:** planned metrics infrastructure, dashboards, alerts, and failure exercises.
+6. **Policy and security:** planned admission controls and workload standards.
+7. **Self-service and cloud extensions:** planned templates, optional portal, and managed infrastructure.
 
 ## Development status
 
-**Phase 1 repository implementation is available.** It defines a three-node local kind cluster, isolated namespaces, and guarded lifecycle operations. This status does not claim that a cluster is currently running or validated. Applications and platform services remain unimplemented, and this project does not claim production readiness.
+**Phase 2 repository implementation is available for review.** It defines application source, tests, a container build, a Helm chart, and pinned Traefik Gateway API configuration. This does not claim that the application or Gateway layer is installed. The project does not claim production readiness.
 
 ## Prerequisites
 
@@ -79,6 +83,8 @@ make validate
 
 After reviewing any existing cluster and persistent data, follow the [cluster creation tutorial](docs/tutorials/create-local-cluster.md). Cluster lifecycle commands are intentionally guarded against the wrong context and arbitrary cluster names.
 
+The [golden-path deployment tutorial](docs/tutorials/deploy-golden-path-application.md) separates repository validation from image builds and cluster mutations.
+
 ## Security principles
 
 - Prefer least privilege and deny-by-default controls.
@@ -94,9 +100,12 @@ See [SECURITY.md](SECURITY.md) for reporting and handling vulnerabilities.
 
 - [Architecture overview](docs/architecture/overview.md)
 - [Local Kubernetes architecture](docs/architecture/local-kubernetes.md)
+- [Golden-path application architecture](docs/architecture/golden-path-application.md)
 - [Architecture decisions](docs/architecture/decisions/0001-use-kind-for-local-kubernetes.md)
 - [Cluster creation tutorial](docs/tutorials/create-local-cluster.md)
 - [Cluster reference](docs/reference/cluster.md)
+- [Application reference](docs/reference/application.md)
+- [Gateway API reference](docs/reference/gateway.md)
 - [Platform engineering concept](docs/concepts/platform-engineering.md)
 - [Tooling reference](docs/reference/tooling.md)
 - [Troubleshooting](docs/troubleshooting.md)

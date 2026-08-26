@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "golden-path-api.fullname" . }}
+  labels:
+    {{- include "golden-path-api.labels" . | nindent 4 }}
+data:
+  APP_NAME: golden-path-api
+  APP_ENVIRONMENT: {{ .Values.config.environment | quote }}
+  APP_LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  APP_VERSION: {{ .Chart.AppVersion | quote }}
+  APP_REVISION: {{ required "image.revision is required" .Values.image.revision | quote }}
