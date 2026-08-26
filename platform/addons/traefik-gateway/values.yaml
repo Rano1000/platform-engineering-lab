@@ -5,6 +5,10 @@ image:
 
 versionOverride: v3.7.10
 
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
 deployment:
   replicas: 1
 

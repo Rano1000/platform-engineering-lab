@@ -16,7 +16,7 @@ Traefik runs as one lightweight Pod in `platform-system`, scheduled only on the 
 
 The Service uses `externalTrafficPolicy: Local`. This prevents the mapped control-plane NodePorts from forwarding to an endpoint on another node; the single Traefik replica is deliberately pinned to that same control-plane by `ingress-ready=true` and its control-plane toleration. Traefik chart 41.2.0 exposes `service.spec` and per-entry-point `nodePort` values for this configuration.
 
-Only the Kubernetes Gateway provider is enabled. Provider namespace watching is limited to `platform-system` and `platform-apps`; the GatewayClass label selector limits reconciliation to the repository-owned `platform-traefik` class. The Proxy image is pinned to its multi-platform OCI index digest as well as its readable version.
+Only the Kubernetes Gateway provider is enabled. Provider namespace watching is limited to `platform-system` and `platform-apps`; the GatewayClass label selector limits reconciliation to the repository-owned `platform-traefik` class. The Proxy image is pinned to its multi-platform OCI index digest as well as its readable version. Release checks and anonymous usage reporting are disabled to avoid unnecessary outbound traffic.
 
 `gateway-install` verifies the chart's OCI digest and archive checksum and verifies the versioned Gateway API bundle checksum before making any cluster change. It then installs the Standard-channel CRDs, network policy, chart, and platform Gateway. `gateway-uninstall` removes the Gateway and chart release after exact confirmation but preserves shared cluster-scoped Gateway API CRDs.
 

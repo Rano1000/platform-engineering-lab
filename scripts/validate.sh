@@ -354,9 +354,12 @@ PY
      grep -q '^TRAEFIK_CHART_VERSION=41.2.0$' scripts/lib/app-common.sh &&
      grep -q '^TRAEFIK_CHART_DIGEST=sha256:5d1a255b73e5dd67d70fc21b1536a405d88bf6b63896bc78dbefa15e9bfb371b$' scripts/lib/app-common.sh &&
      grep -q '^TRAEFIK_CHART_ARCHIVE_SHA256=f7f8b70f021f34164709bc6440165c0ccb79073dccb6369310d95a1c3cf8a2f0$' scripts/lib/app-common.sh &&
+     grep -q '^TRAEFIK_IMAGE_DIGEST=sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac$' scripts/lib/app-common.sh &&
      grep -q '^GATEWAY_API_VERSION=v1.6.1$' scripts/lib/app-common.sh &&
      grep -q '^GATEWAY_API_SHA256=24d931f22abd8e40c973264319ead7cfa09d0fb7716b7ab1ee2ff174cb063a73$' scripts/lib/app-common.sh &&
      grep -q '^  digest: sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac$' "$gateway/values.yaml" &&
+     grep -q '^  checkNewVersion: false$' "$gateway/values.yaml" &&
+     grep -q '^  sendAnonymousUsage: false$' "$gateway/values.yaml" &&
      grep -q 'kubernetesGateway:' "$gateway/values.yaml" &&
      grep -q 'kubernetesIngress:' "$gateway/values.yaml" &&
      grep -q '^    type: NodePort$' "$gateway/values.yaml" &&

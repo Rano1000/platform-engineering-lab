@@ -65,7 +65,8 @@ validate_gateway() {
   kubectl_lab wait --for=condition=Accepted gatewayclass/platform-traefik --timeout=60s
   kubectl_lab wait --namespace "$TRAEFIK_NAMESPACE" --for=condition=Programmed gateway/platform-gateway --timeout=60s
   image=$(kubectl_lab get deployment traefik --namespace "$TRAEFIK_NAMESPACE" -o jsonpath='{.spec.template.spec.containers[0].image}')
-  case "$image" in *"$TRAEFIK_VERSION"*) ;; *) die "Traefik image '$image' does not match $TRAEFIK_VERSION." ;; esac
+  expected_image="docker.io/traefik@$TRAEFIK_IMAGE_DIGEST"
+  [ "$image" = "$expected_image" ] || die "Traefik image '$image' does not match the pinned digest '$expected_image'."
   http_node_port=$(kubectl_lab get service traefik --namespace "$TRAEFIK_NAMESPACE" -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}')
   https_node_port=$(kubectl_lab get service traefik --namespace "$TRAEFIK_NAMESPACE" -o jsonpath='{.spec.ports[?(@.name=="websecure")].nodePort}')
   [ "$http_node_port" = 30080 ] || die "Traefik HTTP NodePort is '${http_node_port:-unset}', expected 30080."

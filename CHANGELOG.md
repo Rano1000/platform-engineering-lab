@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Validate Traefik's digest-only runtime image reference and disable unnecessary outbound version checks.
 - Record the complete Git commit in OCI revision metadata while retaining readable 12-character image tags.
 - Restrict public routing to the exact root path and verify pinned Gateway artifacts before installation.
 - Route localhost HTTP and HTTPS through fixed Traefik NodePorts without Pod host ports, preserving Baseline Pod Security enforcement.
