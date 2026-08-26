@@ -11,5 +11,6 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Use a realistic finite timeout for runtime cluster health checks.
 - Make shell validation deterministic and enable pinned GitHub Actions workflow linting in CI.
 - Resolve shared cluster-library paths correctly during ShellCheck validation.

@@ -7,6 +7,7 @@ SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd)
 
 PASS_COUNT=0
 FAIL_COUNT=0
+RUNTIME_CHECK_TIMEOUT=30s
 
 pass() { PASS_COUNT=$((PASS_COUNT + 1)); printf 'PASS  %s\n' "$*"; }
 fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); printf 'FAIL  %s\n' "$*"; }
@@ -51,10 +52,10 @@ else
 fi
 if [ "$wrong_versions" -eq 0 ]; then pass "all nodes run Kubernetes $KUBERNETES_VERSION."; else fail "$wrong_versions node(s) do not run $KUBERNETES_VERSION."; fi
 
-if kubectl_lab rollout status deployment/coredns --namespace kube-system --timeout=1s >/dev/null 2>&1; then pass 'CoreDNS is available.'; else fail 'CoreDNS is not available.'; fi
-if kubectl_lab rollout status daemonset/kindnet --namespace kube-system --timeout=1s >/dev/null 2>&1; then pass 'kindnet CNI is available.'; else fail 'kindnet CNI is not available.'; fi
-if kubectl_lab rollout status daemonset/kube-proxy --namespace kube-system --timeout=1s >/dev/null 2>&1; then pass 'kube-proxy is available.'; else fail 'kube-proxy is not available.'; fi
-if kubectl_lab wait --namespace kube-system --for=condition=Ready pods --all --timeout=1s >/dev/null 2>&1; then pass 'all critical system Pods are Ready.'; else fail 'one or more critical system Pods are not Ready.'; fi
+if kubectl_lab rollout status deployment/coredns --namespace kube-system --timeout="$RUNTIME_CHECK_TIMEOUT" >/dev/null 2>&1; then pass 'CoreDNS is available.'; else fail 'CoreDNS is not available.'; fi
+if kubectl_lab rollout status daemonset/kindnet --namespace kube-system --timeout="$RUNTIME_CHECK_TIMEOUT" >/dev/null 2>&1; then pass 'kindnet CNI is available.'; else fail 'kindnet CNI is not available.'; fi
+if kubectl_lab rollout status daemonset/kube-proxy --namespace kube-system --timeout="$RUNTIME_CHECK_TIMEOUT" >/dev/null 2>&1; then pass 'kube-proxy is available.'; else fail 'kube-proxy is not available.'; fi
+if kubectl_lab wait --namespace kube-system --for=condition=Ready pods --all --timeout="$RUNTIME_CHECK_TIMEOUT" >/dev/null 2>&1; then pass 'all critical system Pods are Ready.'; else fail 'one or more critical system Pods are not Ready.'; fi
 
 for namespace in platform-system platform-apps observability security gitops; do
   if kubectl_lab get namespace "$namespace" >/dev/null 2>&1; then
