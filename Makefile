@@ -53,6 +53,7 @@ promotion-policy-test: ## Test image-impact, artifact-integrity, and promotion p
 
 publication-policy-test: ## Test manual verified-artifact publication policy.
 	@./scripts/validate-publication.py self-test
+	@./scripts/stage-publication.py self-test
 
 phase4-check: ## Render and validate Phase 4 repository contracts without contacting Kubernetes.
 	@./scripts/validate-phase4.sh

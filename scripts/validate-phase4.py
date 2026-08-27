@@ -173,8 +173,13 @@ def validate_workflow() -> None:
     assert "validate-publication.py source" in publication_text
     assert "validate-publication.py artifacts" in publication_text
     assert "supply-chain.sh scan-reference" in publication_text
-    assert 'ARTIFACT_DIR="$ARTIFACT_DIR/prepublication-scan" make app-scan' in publication_text
+    assert "TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache" in publication_text
+    assert "ARTIFACT_DIR=.artifacts/prepublication-scan make app-scan" in publication_text
     assert 'ARTIFACT_DIR="$ARTIFACT_DIR/registry-scan"' in publication_text
+    assert "stage-publication.py create" in publication_text
+    assert "stage-publication.py validate" in publication_text
+    assert "path: .artifacts/publication-staged" not in publication_text
+    assert ".artifacts/publication-staged/staging-manifest.json" in publication_text
     assert publication["jobs"]["publish"]["permissions"] == {
         "actions": "read", "contents": "read", "packages": "write"
     }

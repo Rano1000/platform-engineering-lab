@@ -38,6 +38,7 @@ concurrency:
 env:
   ARTIFACT_DIR: .artifacts/publication
   EXPECTED_REPOSITORY: Rano1000/platform-engineering-lab
+  PUBLICATION_STAGING_DIR: .artifacts/publication-staged
 
 jobs:
   validate-source:
@@ -122,31 +123,85 @@ jobs:
           SOURCE_REVISION: ${{ inputs.source_revision }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
         run: |
+          verification_dir=.artifacts/publication-verification
+          mkdir -p "$verification_dir"
           gh_bin=$(./scripts/install-pinned-gh.sh .tools)
           "$gh_bin" attestation verify "$ARTIFACT_DIR/golden-path-api.tar" \
-            --repo "$EXPECTED_REPOSITORY" --format json > archive-attestation.json
+            --repo "$EXPECTED_REPOSITORY" --format json \
+            > "$verification_dir/archive-attestation-verification.json"
           "$gh_bin" attestation verify "$ARTIFACT_DIR/golden-path-api.cdx.json" \
-            --repo "$EXPECTED_REPOSITORY" --format json > sbom-attestation.json
-          ./scripts/validate-publication.py attestation --result archive-attestation.json \
+            --repo "$EXPECTED_REPOSITORY" --format json \
+            > "$verification_dir/sbom-attestation-verification.json"
+          ./scripts/validate-publication.py attestation \
+            --result "$verification_dir/archive-attestation-verification.json" \
             --subject golden-path-api.tar --checksum "$ARCHIVE_SHA256" \
             --revision "$SOURCE_REVISION" --run-id "$SOURCE_RUN_ID"
-          ./scripts/validate-publication.py attestation --result sbom-attestation.json \
+          ./scripts/validate-publication.py attestation \
+            --result "$verification_dir/sbom-attestation-verification.json" \
             --subject golden-path-api.cdx.json --checksum "$SBOM_SHA256" \
             --revision "$SOURCE_REVISION" --run-id "$SOURCE_RUN_ID"
-          printf '%s\n' "$ARCHIVE_SHA256" > "$ARTIFACT_DIR/.attestations-verified"
+          printf '%s\n' "$ARCHIVE_SHA256" > "$verification_dir/.attestations-verified"
       - name: Load verified archive and enforce current vulnerability policy
         env:
           SOURCE_REVISION: ${{ inputs.source_revision }}
+          TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache
         run: |
           python3 -c 'import json; assert json.load(open("config/supply-chain/vulnerability-exceptions.json"))["exceptions"] == []'
           ./scripts/supply-chain.sh load-artifact
           make app-image-inspect
-          ARTIFACT_DIR="$ARTIFACT_DIR/prepublication-scan" make app-scan
+          ARTIFACT_DIR=.artifacts/prepublication-scan make app-scan
+      - name: Stage exact verified publication files
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          verification_dir=.artifacts/publication-verification
+          python3 - "$verification_dir/source-run-verification.json" \
+            "$SOURCE_RUN_ID" "$SOURCE_REVISION" <<'PY'
+          import json, pathlib, sys
+          evidence = {
+              "conclusion": "success",
+              "event": "workflow_dispatch",
+              "forceImageBuild": True,
+              "repository": "Rano1000/platform-engineering-lab",
+              "revision": sys.argv[3],
+              "runId": sys.argv[2],
+              "validation": "passed",
+              "workflow": "Application supply chain",
+          }
+          pathlib.Path(sys.argv[1]).write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+          ./scripts/stage-publication.py create \
+            --source "$ARTIFACT_DIR" \
+            --scan .artifacts/prepublication-scan \
+            --verification "$verification_dir" \
+            --destination "$PUBLICATION_STAGING_DIR"
+          ./scripts/stage-publication.py validate --directory "$PUBLICATION_STAGING_DIR"
       - name: Upload verified publication input
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: verified-publication-input-${{ inputs.source_revision }}
-          path: .artifacts/publication
+          path: |
+            .artifacts/publication-staged/.attestations-verified
+            .artifacts/publication-staged/archive-attestation-verification.json
+            .artifacts/publication-staged/golden-path-api.cdx.json
+            .artifacts/publication-staged/golden-path-api.cdx.json.sha256
+            .artifacts/publication-staged/golden-path-api.tar
+            .artifacts/publication-staged/golden-path-api.tar.sha256
+            .artifacts/publication-staged/prepublication-scan-summary.json
+            .artifacts/publication-staged/prepublication-trivy-metadata.json
+            .artifacts/publication-staged/prepublication-trivy-vulnerabilities.json
+            .artifacts/publication-staged/prepublication-trivy-vulnerabilities.json.sha256
+            .artifacts/publication-staged/sbom-attestation-verification.json
+            .artifacts/publication-staged/sbom-metadata.json
+            .artifacts/publication-staged/scan-summary.json
+            .artifacts/publication-staged/source-run-verification.json
+            .artifacts/publication-staged/staging-manifest.json
+            .artifacts/publication-staged/trivy-metadata.json
+            .artifacts/publication-staged/trivy-vulnerabilities.json
+            .artifacts/publication-staged/trivy-vulnerabilities.json.sha256
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 14
@@ -197,7 +252,9 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           PUBLICATION_CONFIRMATION: ${{ inputs.publication_confirmation }}
           SOURCE_REVISION: ${{ inputs.source_revision }}
-        run: ./scripts/publish-image.sh publish "$ARTIFACT_DIR"
+        run: |
+          ./scripts/stage-publication.py validate --directory "$ARTIFACT_DIR"
+          ./scripts/publish-image.sh publish "$ARTIFACT_DIR"
 
   attest-registry-image:
     name: Attest exact registry image
@@ -241,6 +298,7 @@ jobs:
           PUBLISHED_DIGEST: ${{ needs.publish.outputs.digest }}
           PUBLISHED_IMAGE: ${{ needs.publish.outputs.image }}
           SOURCE_REVISION: ${{ inputs.source_revision }}
+          TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache
         run: |
           reference="$PUBLISHED_IMAGE@$PUBLISHED_DIGEST"
           gh_bin=$(./scripts/install-pinned-gh.sh .tools)

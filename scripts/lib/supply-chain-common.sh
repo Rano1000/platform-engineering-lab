@@ -8,6 +8,7 @@ case $ARTIFACT_DIR in
   /*) ;;
   *) ARTIFACT_DIR=$PROJECT_ROOT/$ARTIFACT_DIR ;;
 esac
+TRIVY_CACHE_DIR=${TRIVY_CACHE_DIR:-$ARTIFACT_DIR/trivy-cache}
 IMAGE_ARCHIVE=$ARTIFACT_DIR/golden-path-api.tar
 IMAGE_CHECKSUM=$IMAGE_ARCHIVE.sha256
 SBOM=$ARTIFACT_DIR/golden-path-api.cdx.json
@@ -53,12 +54,12 @@ prepare_artifacts() {
 run_trivy() {
   require_command docker
   prepare_artifacts
-  mkdir -p "$ARTIFACT_DIR/trivy-cache"
+  mkdir -p "$TRIVY_CACHE_DIR"
   docker run --rm \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v "$PROJECT_ROOT:/workspace:ro" \
     -v "$ARTIFACT_DIR:/artifacts" \
-    -v "$ARTIFACT_DIR/trivy-cache:/root/.cache/trivy" \
+    -v "$TRIVY_CACHE_DIR:/root/.cache/trivy" \
     "$TRIVY_IMAGE" "$@"
 }
 
