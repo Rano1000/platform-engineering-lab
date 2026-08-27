@@ -3,7 +3,11 @@
 PROJECT_ROOT=$(CDPATH='' cd "$SCRIPT_DIR/.." && pwd)
 APP_VERSION=0.1.0
 APP_IMAGE=golden-path-api
-ARTIFACT_DIR=${ARTIFACT_DIR:-$PROJECT_ROOT/.artifacts/supply-chain}
+ARTIFACT_DIR=${ARTIFACT_DIR:-.artifacts/supply-chain}
+case $ARTIFACT_DIR in
+  /*) ;;
+  *) ARTIFACT_DIR=$PROJECT_ROOT/$ARTIFACT_DIR ;;
+esac
 IMAGE_ARCHIVE=$ARTIFACT_DIR/golden-path-api.tar
 IMAGE_CHECKSUM=$IMAGE_ARCHIVE.sha256
 SBOM=$ARTIFACT_DIR/golden-path-api.cdx.json
