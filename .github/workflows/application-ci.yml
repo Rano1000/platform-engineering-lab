@@ -95,8 +95,11 @@ jobs:
           archive_sha256=$(cut -d ' ' -f 1 "$ARTIFACT_DIR/golden-path-api.tar.sha256")
           echo "reference=$reference" >> "$GITHUB_OUTPUT"
           echo "archive_sha256=$archive_sha256" >> "$GITHUB_OUTPUT"
-          printf '### Immutable image\n\nImage: `%s`\n\nOCI revision: `%s`\n\nArchive SHA-256: `%s`\n\nUnit tests: **passed**\n' \
-            "$reference" "$GITHUB_SHA" "$archive_sha256" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n\n' '### Immutable image' \
+            "Image: \`$reference\`" \
+            "OCI revision: \`$GITHUB_SHA\`" \
+            "Archive SHA-256: \`$archive_sha256\`" \
+            'Unit tests: **passed**' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload immutable image archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
@@ -260,7 +263,9 @@ jobs:
       - name: Cryptographically verify archive and SBOM
         run: |
           ./scripts/verify-promotion-artifacts.sh artifacts .artifacts/publication gh
-          cut -d ' ' -f 1 .artifacts/publication/golden-path-api.tar.sha256 > .artifacts/publication/.attestations-verified
+          cut -d ' ' -f 1 \
+            .artifacts/publication/golden-path-api.tar.sha256 \
+            > .artifacts/publication/.attestations-verified
       - name: Publish exact verified archive
         id: publish
         env:
@@ -309,7 +314,9 @@ jobs:
           ./scripts/verify-promotion-artifacts.sh image \
             "${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}" gh
       - name: Rescan exact registry digest
-        run: ./scripts/supply-chain.sh scan-reference "${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}"
+        run: |
+          ./scripts/supply-chain.sh scan-reference \
+            "${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}"
       - name: Confirm public linked package
         env:
           GH_TOKEN: ${{ github.token }}
@@ -349,7 +356,17 @@ jobs:
   conclusion:
     name: Application CI conclusion
     if: always()
-    needs: [changes, repository, image, chart-promotion, supply-chain, attest-artifacts, publication-gate, publish, attest-image, promote]
+    needs:
+      - changes
+      - repository
+      - image
+      - chart-promotion
+      - supply-chain
+      - attest-artifacts
+      - publication-gate
+      - publish
+      - attest-image
+      - promote
     runs-on: ubuntu-24.04
     steps:
       - name: Enforce required conclusions
