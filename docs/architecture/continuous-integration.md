@@ -14,8 +14,9 @@ flowchart LR
     Supply --> Reports[Fourteen-day artifacts]
     SBOM --> Reports
     Reports --> Attest[Main-push artifact attestation]
-    Attest -. approved image inputs .-> Publish[Verified public GHCR publication]
-    Publish --> Promote[Reviewed digest promotion PR]
+    Attest -. exact manual source-run gate .-> Publish[Verified GHCR publication]
+    Publish --> Evidence[Attested promotion evidence]
+    Evidence -. separate approval .-> Promote[Reviewed digest promotion PR]
     Promote -. no direct deployment .-> Cluster[Phase 2 cluster]
 ```
 
@@ -25,7 +26,7 @@ flowchart LR
 - Artifact and registry-image attestation jobs alone receive `id-token: write` and `attestations: write`.
 - Fork pull requests receive no secrets and cannot run through `pull_request_target`.
 - The image is built once, exported with a SHA-256 checksum, and consumed unchanged by later jobs.
-- Only the publication job receives `packages: write`; only the promotion job receives repository and pull-request write access. CI has no kubeconfig, deployment credential, or cluster target.
+- Only the manual publication workflow's final publication job receives `packages: write`. It cannot open pull requests, and CI has no kubeconfig, deployment credential, or cluster target.
 
 ## Failure behavior
 

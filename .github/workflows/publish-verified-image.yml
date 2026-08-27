@@ -1,0 +1,323 @@
+name: Publish verified image
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful forced Application supply-chain run ID
+        required: true
+        type: string
+      source_revision:
+        description: Complete source commit SHA
+        required: true
+        type: string
+      image_archive_sha256:
+        description: Expected image archive SHA-256
+        required: true
+        type: string
+      sbom_sha256:
+        description: Expected CycloneDX SBOM SHA-256
+        required: true
+        type: string
+      vulnerability_report_sha256:
+        description: Expected vulnerability report SHA-256
+        required: true
+        type: string
+      publication_confirmation:
+        description: Repository/source revision/archive checksum confirmation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-verified-image-${{ inputs.source_revision }}
+  cancel-in-progress: false
+
+env:
+  ARTIFACT_DIR: .artifacts/publication
+  EXPECTED_REPOSITORY: Rano1000/platform-engineering-lab
+
+jobs:
+  validate-source:
+    name: Validate source run
+    if: github.ref == 'refs/heads/main' && github.event.repository.default_branch == 'main'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out default branch history
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned GitHub CLI
+        run: echo "GH_BIN=$(./scripts/install-pinned-gh.sh .tools)" >> "$GITHUB_ENV"
+      - name: Validate immutable request and source run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          ARCHIVE_SHA256: ${{ inputs.image_archive_sha256 }}
+          SBOM_SHA256: ${{ inputs.sbom_sha256 }}
+          VULNERABILITY_SHA256: ${{ inputs.vulnerability_report_sha256 }}
+          TYPED_CONFIRMATION: ${{ inputs.publication_confirmation }}
+        run: |
+          printf '%s' "$SOURCE_RUN_ID" | grep -Eq '^[1-9][0-9]*$'
+          printf '%s' "$SOURCE_REVISION" | grep -Eq '^[0-9a-f]{40}$'
+          for checksum in "$ARCHIVE_SHA256" "$SBOM_SHA256" "$VULNERABILITY_SHA256"; do
+            printf '%s' "$checksum" | grep -Eq '^[0-9a-f]{64}$'
+          done
+          expected="$EXPECTED_REPOSITORY/$SOURCE_REVISION/$ARCHIVE_SHA256"
+          [ "$TYPED_CONFIRMATION" = "$expected" ] || {
+            echo 'Typed publication confirmation does not match the immutable request.' >&2
+            exit 1
+          }
+          git merge-base --is-ancestor "$SOURCE_REVISION" origin/main
+          "$GH_BIN" api "repos/$EXPECTED_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > run.json
+          "$GH_BIN" api "repos/$EXPECTED_REPOSITORY/actions/runs/$SOURCE_RUN_ID/jobs?per_page=100" > jobs.json
+          "$GH_BIN" api "repos/$EXPECTED_REPOSITORY/actions/runs/$SOURCE_RUN_ID/artifacts?per_page=100" > artifacts.json
+          "$GH_BIN" run view "$SOURCE_RUN_ID" --repo "$EXPECTED_REPOSITORY" --log > run.log
+          ./scripts/validate-publication.py source \
+            --run-json run.json --jobs-json jobs.json --artifacts-json artifacts.json \
+            --run-log run.log --revision "$SOURCE_REVISION" --run-id "$SOURCE_RUN_ID"
+
+  verify-artifacts:
+    name: Verify artifacts and rescan archive
+    needs: validate-source
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out publication policy
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Download exact source-run artifacts
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
+        with:
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          pattern: golden-path-*-${{ inputs.source_revision }}
+          merge-multiple: true
+          path: .artifacts/publication
+      - name: Verify supplied checksums and archived image identity
+        env:
+          ARCHIVE_SHA256: ${{ inputs.image_archive_sha256 }}
+          SBOM_SHA256: ${{ inputs.sbom_sha256 }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          VULNERABILITY_SHA256: ${{ inputs.vulnerability_report_sha256 }}
+        run: |
+          ./scripts/validate-publication.py artifacts --directory "$ARTIFACT_DIR" \
+            --revision "$SOURCE_REVISION" --archive-sha256 "$ARCHIVE_SHA256" \
+            --sbom-sha256 "$SBOM_SHA256" --vulnerability-report-sha256 "$VULNERABILITY_SHA256"
+      - name: Cryptographically verify source attestations
+        env:
+          ARCHIVE_SHA256: ${{ inputs.image_archive_sha256 }}
+          GH_TOKEN: ${{ github.token }}
+          SBOM_SHA256: ${{ inputs.sbom_sha256 }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          gh_bin=$(./scripts/install-pinned-gh.sh .tools)
+          "$gh_bin" attestation verify "$ARTIFACT_DIR/golden-path-api.tar" \
+            --repo "$EXPECTED_REPOSITORY" --format json > archive-attestation.json
+          "$gh_bin" attestation verify "$ARTIFACT_DIR/golden-path-api.cdx.json" \
+            --repo "$EXPECTED_REPOSITORY" --format json > sbom-attestation.json
+          ./scripts/validate-publication.py attestation --result archive-attestation.json \
+            --subject golden-path-api.tar --checksum "$ARCHIVE_SHA256" \
+            --revision "$SOURCE_REVISION" --run-id "$SOURCE_RUN_ID"
+          ./scripts/validate-publication.py attestation --result sbom-attestation.json \
+            --subject golden-path-api.cdx.json --checksum "$SBOM_SHA256" \
+            --revision "$SOURCE_REVISION" --run-id "$SOURCE_RUN_ID"
+          printf '%s\n' "$ARCHIVE_SHA256" > "$ARTIFACT_DIR/.attestations-verified"
+      - name: Load verified archive and enforce current vulnerability policy
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        run: |
+          python3 -c 'import json; assert json.load(open("config/supply-chain/vulnerability-exceptions.json"))["exceptions"] == []'
+          ./scripts/supply-chain.sh load-artifact
+          make app-image-inspect
+          ARTIFACT_DIR="$ARTIFACT_DIR/prepublication-scan" make app-scan
+      - name: Upload verified publication input
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: verified-publication-input-${{ inputs.source_revision }}
+          path: .artifacts/publication
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14
+
+  approve-publication:
+    name: Enforce publication approval
+    needs: verify-artifacts
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require independent approval and exact confirmation
+        env:
+          APPROVED: ${{ vars.GHCR_PUBLICATION_APPROVED }}
+          CONFIRMATION: ${{ inputs.publication_confirmation }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          ARCHIVE_SHA256: ${{ inputs.image_archive_sha256 }}
+        run: |
+          [ "$APPROVED" = true ] || { echo 'GHCR publication is not approved.' >&2; exit 1; }
+          expected="Rano1000/platform-engineering-lab/$SOURCE_REVISION/$ARCHIVE_SHA256"
+          [ "$CONFIRMATION" = "$expected" ] || { echo 'Typed confirmation mismatch.' >&2; exit 1; }
+
+  publish:
+    name: Publish exact verified archive
+    needs: approve-publication
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+      digest: ${{ steps.publish.outputs.digest }}
+      revision: ${{ steps.publish.outputs.revision }}
+    steps:
+      - name: Check out publication implementation
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Download verified publication input
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
+        with:
+          name: verified-publication-input-${{ inputs.source_revision }}
+          path: .artifacts/publication
+      - name: Publish archive once
+        id: publish
+        env:
+          EXPECTED_ARCHIVE_SHA256: ${{ inputs.image_archive_sha256 }}
+          GHCR_PUBLICATION_APPROVED: ${{ vars.GHCR_PUBLICATION_APPROVED }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PUBLICATION_CONFIRMATION: ${{ inputs.publication_confirmation }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        run: ./scripts/publish-image.sh publish "$ARTIFACT_DIR"
+
+  attest-registry-image:
+    name: Attest exact registry image
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Attest immutable registry subject
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
+        with:
+          subject-name: ${{ needs.publish.outputs.image }}
+          subject-digest: ${{ needs.publish.outputs.digest }}
+
+  verify-registry-image:
+    name: Verify registry image and create evidence
+    needs: [publish, attest-registry-image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      repository_linked: ${{ steps.evidence.outputs.repository_linked }}
+      visibility: ${{ steps.evidence.outputs.visibility }}
+    steps:
+      - name: Check out verification policy
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Download verified source evidence
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
+        with:
+          name: verified-publication-input-${{ inputs.source_revision }}
+          path: .artifacts/publication
+      - name: Verify registry attestation, identity, and current vulnerabilities
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PUBLISHED_DIGEST: ${{ needs.publish.outputs.digest }}
+          PUBLISHED_IMAGE: ${{ needs.publish.outputs.image }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+        run: |
+          reference="$PUBLISHED_IMAGE@$PUBLISHED_DIGEST"
+          gh_bin=$(./scripts/install-pinned-gh.sh .tools)
+          ./scripts/verify-promotion-artifacts.sh image "$reference" "$gh_bin"
+          printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username github-actions --password-stdin >/dev/null
+          docker pull "$reference" >/dev/null
+          revision=$(docker image inspect "$reference" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
+          source=$(docker image inspect "$reference" --format '{{index .Config.Labels "org.opencontainers.image.source"}}')
+          [ "$revision" = "$SOURCE_REVISION" ]
+          [ "$source" = 'https://github.com/Rano1000/platform-engineering-lab' ]
+          ARTIFACT_DIR="$ARTIFACT_DIR/registry-scan" \
+            ./scripts/supply-chain.sh scan-reference "$reference"
+          "$gh_bin" api /users/Rano1000/packages/container/golden-path-api > "$ARTIFACT_DIR/package.json"
+      - name: Create checksummed publication evidence
+        id: evidence
+        env:
+          PUBLISHED_DIGEST: ${{ needs.publish.outputs.digest }}
+          PUBLISHED_IMAGE: ${{ needs.publish.outputs.image }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          ./scripts/create-publication-evidence.py \
+            --source-run-id "$SOURCE_RUN_ID" --source-revision "$SOURCE_REVISION" \
+            --image "$PUBLISHED_IMAGE" --digest "$PUBLISHED_DIGEST" \
+            --artifact-directory "$ARTIFACT_DIR" \
+            --output "$ARTIFACT_DIR/promotion-evidence.json"
+          (cd "$ARTIFACT_DIR" && sha256sum promotion-evidence.json > promotion-evidence.json.sha256)
+          visibility=$(python3 -c 'import json; print(json.load(open(".artifacts/publication/promotion-evidence.json"))["package"]["visibility"])')
+          repository_linked=$(python3 -c 'import json; print(str(json.load(open(".artifacts/publication/promotion-evidence.json"))["package"]["repositoryLinked"]).lower())')
+          echo "visibility=$visibility" >> "$GITHUB_OUTPUT"
+          echo "repository_linked=$repository_linked" >> "$GITHUB_OUTPUT"
+      - name: Upload promotion evidence without opening a pull request
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: publication-evidence-${{ inputs.source_revision }}
+          path: |
+            .artifacts/publication/promotion-evidence.json
+            .artifacts/publication/promotion-evidence.json.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  attest-promotion-evidence:
+    name: Attest promotion evidence
+    needs: verify-registry-image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download promotion evidence
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
+        with:
+          name: publication-evidence-${{ inputs.source_revision }}
+          path: evidence
+      - name: Attest exact promotion evidence
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
+        with:
+          subject-path: evidence/promotion-evidence.json
+
+  visibility-gate:
+    name: Require manual public visibility
+    needs: [verify-registry-image, attest-promotion-evidence]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Stop before promotion unless the package is public
+        env:
+          REPOSITORY_LINKED: ${{ needs.verify-registry-image.outputs.repository_linked }}
+          VISIBILITY: ${{ needs.verify-registry-image.outputs.visibility }}
+        run: |
+          echo 'Publication evidence was created. No promotion was attempted.'
+          if [ "$REPOSITORY_LINKED" != true ]; then
+            echo 'Link the package to Rano1000/platform-engineering-lab manually before requesting promotion.' >&2
+            exit 1
+          fi
+          if [ "$VISIBILITY" != public ]; then
+            echo "Package visibility is '$VISIBILITY'. Change it manually before requesting promotion." >&2
+            exit 1
+          fi
+          echo 'Package visibility is public. Promotion still requires separate approval.'

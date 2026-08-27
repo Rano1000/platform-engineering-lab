@@ -30,6 +30,11 @@ require_command() {
 }
 
 full_revision() {
+  if [ -n "${SOURCE_REVISION:-}" ]; then
+    printf '%s\n' "$SOURCE_REVISION" | grep -Eq '^[0-9a-f]{40}$' || die 'SOURCE_REVISION must be a complete lowercase Git SHA.'
+    printf '%s\n' "$SOURCE_REVISION"
+    return
+  fi
   git -C "$PROJECT_ROOT" rev-parse HEAD
 }
 

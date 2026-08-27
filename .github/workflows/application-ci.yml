@@ -234,151 +234,6 @@ jobs:
             artifacts/golden-path-api.tar
             artifacts/golden-path-api.cdx.json
 
-  publication-gate:
-    name: Publication approval
-    if: >-
-      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      (github.event_name == 'workflow_dispatch' && inputs.force_image_build)
-    needs: attest-artifacts
-    runs-on: ubuntu-24.04
-    outputs:
-      approved: ${{ steps.gate.outputs.approved }}
-    steps:
-      - name: Check explicit publication approval
-        id: gate
-        env:
-          APPROVED: ${{ vars.GHCR_PUBLICATION_APPROVED }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          if [ "$EVENT_NAME" = push ] && [ "$APPROVED" = true ]; then
-            echo 'approved=true' >> "$GITHUB_OUTPUT"
-            message='GHCR publication is explicitly approved.'
-          else
-            echo 'approved=false' >> "$GITHUB_OUTPUT"
-            message='Publication not approved'
-          fi
-          printf '### Publication approval\n\n%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
-
-  publish:
-    name: Publish verified image
-    if: >-
-      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-      needs.publication-gate.outputs.approved == 'true'
-    needs: [publication-gate, image, supply-chain]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      image: ${{ steps.publish.outputs.image }}
-      digest: ${{ steps.publish.outputs.digest }}
-      revision: ${{ steps.publish.outputs.revision }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          persist-credentials: false
-      - name: Download verified artifacts
-        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
-        with:
-          pattern: golden-path-*-${{ github.sha }}
-          merge-multiple: true
-          path: .artifacts/publication
-      - name: Install pinned GitHub CLI
-        run: ./scripts/install-pinned-gh.sh .tools >> "$GITHUB_PATH"
-      - name: Cryptographically verify archive and SBOM
-        run: |
-          ./scripts/verify-promotion-artifacts.sh artifacts .artifacts/publication gh
-          cut -d ' ' -f 1 \
-            .artifacts/publication/golden-path-api.tar.sha256 \
-            > .artifacts/publication/.attestations-verified
-      - name: Publish exact verified archive
-        id: publish
-        env:
-          GHCR_PUBLICATION_APPROVED: ${{ vars.GHCR_PUBLICATION_APPROVED }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: ./scripts/publish-image.sh publish .artifacts/publication
-
-  attest-image:
-    name: Attest registry image
-    needs: publish
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    steps:
-      - name: Attest exact registry subject
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
-        with:
-          subject-name: ${{ needs.publish.outputs.image }}
-          subject-digest: ${{ needs.publish.outputs.digest }}
-
-  promote:
-    name: Verify and open promotion PR
-    needs: [changes, publish, attest-image]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - name: Check out repository for promotion branch
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-      - name: Download supply-chain artifacts
-        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
-        with:
-          pattern: golden-path-*-${{ github.sha }}
-          merge-multiple: true
-          path: .artifacts/promotion
-      - name: Install pinned GitHub CLI
-        run: ./scripts/install-pinned-gh.sh .tools >> "$GITHUB_PATH"
-      - name: Install pinned manifest parser
-        run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
-      - name: Verify all attestations
-        run: |
-          ./scripts/verify-promotion-artifacts.sh artifacts .artifacts/promotion gh
-          ./scripts/verify-promotion-artifacts.sh image \
-            "${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}" gh
-      - name: Rescan exact registry digest
-        run: |
-          ./scripts/supply-chain.sh scan-reference \
-            "${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}"
-      - name: Confirm public linked package
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh api /users/Rano1000/packages/container/golden-path-api > .artifacts/promotion/package.json
-      - name: Create promotion evidence
-        env:
-          CHART_CHANGED: ${{ needs.changes.outputs.chart_changed }}
-        run: |
-          if [ "$CHART_CHANGED" = true ]; then
-            chart_revision=$GITHUB_SHA
-          else
-            chart_revision=$(python3 - <<'PY'
-          import json, pathlib, os
-          path = pathlib.Path('environments/local/gitops/evidence/golden-path-api.json')
-          evidence = json.loads(path.read_text(encoding='utf-8'))
-          print(evidence.get('chartRevision', os.environ['GITHUB_SHA']))
-          PY
-          )
-          fi
-          ./scripts/create-promotion-evidence.py \
-            --chart-revision "$chart_revision" \
-            --image-source-revision "$GITHUB_SHA" \
-            --image-digest "${{ needs.publish.outputs.digest }}" \
-            --archive-checksum .artifacts/promotion/golden-path-api.tar.sha256 \
-            --sbom-checksum .artifacts/promotion/golden-path-api.cdx.json.sha256 \
-            --vulnerability-report-checksum .artifacts/supply-chain/trivy-vulnerabilities.json.sha256 \
-            --scan-summary .artifacts/supply-chain/scan-summary.json \
-            --scan-report .artifacts/supply-chain/trivy-vulnerabilities.json \
-            --package .artifacts/promotion/package.json \
-            --output .artifacts/promotion/promotion-evidence.json
-      - name: Open reviewed promotion pull request
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: ./scripts/create-promotion-pr.sh .artifacts/promotion/promotion-evidence.json
-
   conclusion:
     name: Application CI conclusion
     if: always()
@@ -389,10 +244,6 @@ jobs:
       - chart-promotion
       - supply-chain
       - attest-artifacts
-      - publication-gate
-      - publish
-      - attest-image
-      - promote
     runs-on: ubuntu-24.04
     steps:
       - name: Enforce required conclusions
@@ -404,8 +255,6 @@ jobs:
           IMAGE_RESULT: ${{ needs.image.result }}
           SUPPLY_RESULT: ${{ needs.supply-chain.result }}
           EVENT_NAME: ${{ github.event_name }}
-          PUBLICATION_APPROVED: ${{ needs.publication-gate.outputs.approved }}
-          PROMOTION_RESULT: ${{ needs.promote.result }}
           CHART_PROMOTION_RESULT: ${{ needs.chart-promotion.result }}
         run: |
           [ "$REPOSITORY_RESULT" = success ] || exit 1
@@ -413,9 +262,6 @@ jobs:
             echo 'Image publication not required.'
           else
             [ "$IMAGE_RESULT" = success ] && [ "$SUPPLY_RESULT" = success ] || exit 1
-            if [ "$EVENT_NAME" = push ] && [ "$PUBLICATION_APPROVED" = true ]; then
-              [ "$PROMOTION_RESULT" = success ] || exit 1
-            fi
           fi
           if [ "$EVENT_NAME" = push ] && [ "$CHART_REQUIRED" = true ]; then
             [ "$CHART_PROMOTION_RESULT" = success ] || exit 1

@@ -407,7 +407,7 @@ check_supply_chain() {
     fail 'vulnerability policy or dependency lock validation failed.'
   fi
 
-  if python3 - "$workflow" .github/workflows <<'PY'
+  if python3 - "$workflow" .github/workflows .github/workflows/publish-verified-image.yml <<'PY'
 import pathlib, re, sys, yaml
 
 path = pathlib.Path(sys.argv[1])
@@ -424,9 +424,6 @@ if permissions != {"contents": "read"}:
     errors.append("workflow default permissions must be contents: read only")
 expected_overrides = {
     "attest-artifacts": {"contents": "read", "id-token": "write", "attestations": "write"},
-    "publish": {"contents": "read", "packages": "write"},
-    "attest-image": {"contents": "read", "id-token": "write", "attestations": "write"},
-    "promote": {"contents": "write", "pull-requests": "write"},
     "chart-promotion": {"contents": "write", "pull-requests": "write"},
 }
 for name, job in document.get("jobs", {}).items():
@@ -439,6 +436,22 @@ for name, job in document.get("jobs", {}).items():
         errors.append(f"job {name} unexpectedly overrides permissions")
 if "pull_request_target" in text:
     errors.append("pull_request_target is forbidden")
+publication_path = pathlib.Path(sys.argv[3])
+publication_text = publication_path.read_text(encoding="utf-8")
+publication = yaml.safe_load(publication_text)
+if publication.get("permissions") != {"contents": "read"}:
+    errors.append("publication workflow default permissions must be contents: read only")
+if publication_text.count("packages: write") != 1:
+    errors.append("publication workflow must contain exactly one packages: write grant")
+for name, job in publication.get("jobs", {}).items():
+    if name == "publish":
+        expected = {"actions": "read", "contents": "read", "packages": "write"}
+        if job.get("permissions") != expected:
+            errors.append("publication job permissions are incorrect")
+    elif job.get("permissions", {}).get("packages") == "write":
+        errors.append(f"unexpected package-write permission on {name}")
+if re.search(r"pull_request_target|kubectl|kubeconfig|docker build|create-promotion-pr", publication_text):
+    errors.append("publication workflow contains a forbidden trigger or operation")
 if errors:
     print("\n".join(errors))
     raise SystemExit(1)
@@ -451,9 +464,10 @@ PY
 
   if grep -Fq "TRIVY_VERSION=0.74.0" scripts/lib/supply-chain-common.sh &&
      grep -Fq "@$trivy_digest" scripts/lib/supply-chain-common.sh &&
-     grep -Fq 'retention-days: 14' "$workflow" &&
-     [ "$(grep -Ec '^[[:space:]]+packages: write$' "$workflow")" -eq 1 ] &&
-     ! grep -Eq 'pull_request_target|:[[:space:]]*latest([^[:alnum:]]|$)' "$workflow" scripts/lib/supply-chain-common.sh; then
+     grep -Fq 'retention-days: 14' .github/workflows/publish-verified-image.yml &&
+     [ "$(grep -Ec '^[[:space:]]+packages: write$' .github/workflows/publish-verified-image.yml)" -eq 1 ] &&
+     ! grep -Eq 'pull_request_target|:[[:space:]]*latest([^[:alnum:]]|$)' "$workflow" \
+       .github/workflows/publish-verified-image.yml scripts/lib/supply-chain-common.sh; then
     pass 'Trivy, artifact retention, and least-privilege publication boundaries are pinned.'
   else
     fail 'supply-chain version, retention, or publication boundary is incorrect.'

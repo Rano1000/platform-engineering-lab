@@ -37,6 +37,7 @@ python3 scripts/validate-promotion.py --evidence "$temporary/promotion-evidence.
   --application "$temporary/child-application.yaml"
 ./scripts/verify-promotion-artifacts.sh self-test
 ./scripts/publish-image.sh self-test
+python3 scripts/validate-publication.py self-test
 
 helm lint charts/golden-path-api --kube-version 1.35.0 \
   --set-string "image.tag=$tag" --set-string "image.revision=$revision" >/dev/null

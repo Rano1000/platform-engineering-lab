@@ -129,12 +129,8 @@ def validate_workflow() -> None:
     text = path.read_text(encoding="utf-8")
     workflow = yaml.safe_load(text)
     assert "pull_request_target" not in text
-    assert text.count("packages: write") == 1
-    assert "GHCR_PUBLICATION_APPROVED" in text
+    assert "packages: write" not in text
     assert "./scripts/detect-image-impact.py" in text
-    assert "./scripts/verify-promotion-artifacts.sh artifacts" in text
-    assert "./scripts/verify-promotion-artifacts.sh image" in text
-    assert "./scripts/supply-chain.sh scan-reference" in text
     assert "contents: write" in text and "pull-requests: write" in text
     assert "chart-promotion:" in text
     assert "chart_changed" in text
@@ -142,15 +138,9 @@ def validate_workflow() -> None:
     assert "CLASSIFIED_IMAGE_REQUIRED" in text
     assert "github.event_name == 'workflow_dispatch' && inputs.force_image_build" in text
     assert "github.event_name == 'push' && github.ref == 'refs/heads/main'" in text
-    assert "if [ \"$EVENT_NAME\" = push ] && [ \"$APPROVED\" = true ]" in text
     assert workflow["permissions"] == {"contents": "read"}
 
     jobs = workflow["jobs"]
-    publish_condition = jobs["publish"]["if"]
-    assert "github.event_name == 'push'" in publish_condition
-    assert "needs.publication-gate.outputs.approved == 'true'" in publish_condition
-    assert "force_image_build" not in publish_condition
-    assert jobs["promote"]["needs"] == ["changes", "publish", "attest-image"]
     assert "github.event_name == 'push'" in jobs["chart-promotion"]["if"]
     assert jobs["image"]["if"] == "needs.changes.outputs.image_required == 'true'"
     action_pattern = re.compile(r"uses:\s+[^\s@]+@([0-9a-f]{40})(?:\s|$)")
@@ -161,6 +151,39 @@ def validate_workflow() -> None:
     assert "--force" not in chart_script and "--force" not in (ROOT / "scripts/create-promotion-pr.sh").read_text(encoding="utf-8")
     assert "environments/local/gitops/applications/golden-path-api.yaml" in chart_script
     assert "environments/local/gitops/evidence/golden-path-api.json" in chart_script
+
+    publication_path = ROOT / ".github/workflows/publish-verified-image.yml"
+    publication_text = publication_path.read_text(encoding="utf-8")
+    publication = yaml.safe_load(publication_text)
+    required_inputs = {
+        "source_run_id", "source_revision", "image_archive_sha256", "sbom_sha256",
+        "vulnerability_report_sha256", "publication_confirmation",
+    }
+    triggers = publication.get("on", publication.get(True))
+    assert set(triggers["workflow_dispatch"]["inputs"]) == required_inputs
+    assert all(item["required"] is True for item in triggers["workflow_dispatch"]["inputs"].values())
+    assert publication["permissions"] == {"contents": "read"}
+    assert publication_text.count("packages: write") == 1
+    assert "packages: delete" not in publication_text and "pull_request" not in publication_text
+    assert "kubectl" not in publication_text and "kubeconfig" not in publication_text and "kind " not in publication_text
+    assert "docker build" not in publication_text and "app-build" not in publication_text
+    assert "create-promotion-pr" not in publication_text and "create-chart-promotion-pr" not in publication_text
+    assert "GHCR_PUBLICATION_APPROVED" in publication_text
+    assert "github.ref == 'refs/heads/main'" in publication_text
+    assert "validate-publication.py source" in publication_text
+    assert "validate-publication.py artifacts" in publication_text
+    assert "supply-chain.sh scan-reference" in publication_text
+    assert 'ARTIFACT_DIR="$ARTIFACT_DIR/prepublication-scan" make app-scan' in publication_text
+    assert 'ARTIFACT_DIR="$ARTIFACT_DIR/registry-scan"' in publication_text
+    assert publication["jobs"]["publish"]["permissions"] == {
+        "actions": "read", "contents": "read", "packages": "write"
+    }
+    assert publication["jobs"]["publish"]["needs"] == "approve-publication"
+    for name, job in publication["jobs"].items():
+        if name != "publish":
+            assert job.get("permissions", {}).get("packages") != "write"
+    publication_uses = [line for line in publication_text.splitlines() if "uses:" in line]
+    assert all(action_pattern.search(line) for line in publication_uses), publication_uses
 
 
 def validate_ownership_guards() -> None:

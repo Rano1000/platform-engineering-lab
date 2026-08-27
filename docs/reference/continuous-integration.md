@@ -8,10 +8,10 @@
 2. `repository`: validate repository, dependency-lock, exception-policy, and GitOps contracts.
 3. `image`: when required, run unit tests, build one immutable runtime image, and upload its checksummed archive.
 4. `supply-chain`: reload that archive, scan secrets and vulnerabilities, and generate a CycloneDX SBOM.
-5. `attest-artifacts`: on eligible `main` pushes, attest the exact image archive and SBOM.
-6. `publish`: after separate approval, verify those attestations and publish the same archive to GHCR.
-7. `attest-image` and `promote`: attest and rescan the registry digest, then open a review-only desired-state pull request.
-8. `chart-promotion`: for chart-only main changes, validate with the approved digest and open a chart-revision-only PR without building.
+5. `attest-artifacts`: on eligible `main` pushes or forced validation dispatches, attest the exact image archive and SBOM.
+6. `chart-promotion`: for chart-only main changes, validate with the approved digest and open a chart-revision-only PR without building.
+
+`Publish verified image` is a separate manual workflow. It accepts an exact successful source run and checksums, verifies source-run identity and retained artifacts, rescans without rebuilding, and requires both the approval variable and typed confirmation. The original report, pre-publication rescan, and registry-digest rescan are retained separately. Only its final publication job receives `packages: write`. Registry attestation and evidence generation follow publication, but no promotion PR is created.
 
 Artifacts are retained for 14 days. Workflow permissions default to `contents: read`; only publication receives `packages: write`, only attestation receives OIDC and attestation writes, and only promotion receives repository and pull-request writes. Job summaries include unit-test status, immutable image identity, archive and SBOM checksums, finding totals by severity and fix availability, and scanner database metadata.
 
@@ -33,7 +33,7 @@ Expired or malformed entries fail before scanning. The full Trivy JSON report in
 
 The image tag contains the first 12 characters of the workflow commit. The OCI revision label contains the complete 40-character commit. `golden-path-api.tar.sha256` authenticates the archive passed between jobs. The SBOM companion summary records the image reference, revision, Trivy version, and SBOM checksum.
 
-Publication never rebuilds. A pinned, checksum-verified GitHub CLI verifies the archive and SBOM attestations before the archive is pushed. Promotion verifies the registry-image attestation, confirms public package visibility and repository linkage, rescans the complete registry digest, and records separate `imageSourceRevision` and `chartRevision` values. The OCI revision must match the image source revision; the child Application renders the chart from the chart revision.
+Publication never rebuilds. A pinned, checksum-verified GitHub CLI verifies the archive and SBOM attestations and binds them to the source run before the archive is pushed. The publication workflow verifies the registry-image attestation, records package visibility and linkage, rescans the complete registry digest, and produces attested evidence. Promotion remains a later reviewed operation. The OCI revision must match the image source revision; the child Application renders the chart from the separately approved chart revision.
 
 ## Updating dependencies
 

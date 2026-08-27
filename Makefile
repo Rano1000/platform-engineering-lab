@@ -2,7 +2,7 @@ SHELL := /bin/sh
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor validate lint docs-check cluster-create cluster-status cluster-validate cluster-destroy cluster-recreate namespaces-apply policies-apply app-test app-build app-load app-deploy app-status app-validate app-uninstall app-ownership-status app-network-test app-recovery-test gateway-install gateway-status gateway-validate gateway-uninstall dependency-locks-check dependency-locks-update supply-chain-policy-test supply-chain-secret-scan app-image-artifact app-image-inspect app-sbom app-scan promotion-policy-test phase4-check ci-check gitops-install gitops-bootstrap gitops-status gitops-root-status gitops-root-diff gitops-root-sync gitops-app-status gitops-app-diff gitops-app-sync gitops-validate gitops-uninstall
+.PHONY: help doctor validate lint docs-check cluster-create cluster-status cluster-validate cluster-destroy cluster-recreate namespaces-apply policies-apply app-test app-build app-load app-deploy app-status app-validate app-uninstall app-ownership-status app-network-test app-recovery-test gateway-install gateway-status gateway-validate gateway-uninstall dependency-locks-check dependency-locks-update supply-chain-policy-test supply-chain-secret-scan app-image-artifact app-image-inspect app-sbom app-scan promotion-policy-test publication-policy-test phase4-check ci-check gitops-install gitops-bootstrap gitops-status gitops-root-status gitops-root-diff gitops-root-sync gitops-app-status gitops-app-diff gitops-app-sync gitops-validate gitops-uninstall
 
 help: ## Show available targets.
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -50,6 +50,9 @@ promotion-policy-test: ## Test image-impact, artifact-integrity, and promotion p
 	@./scripts/validate-reconciliation.py --self-test
 	@./scripts/verify-promotion-artifacts.sh self-test
 	@./scripts/publish-image.sh self-test
+
+publication-policy-test: ## Test manual verified-artifact publication policy.
+	@./scripts/validate-publication.py self-test
 
 phase4-check: ## Render and validate Phase 4 repository contracts without contacting Kubernetes.
 	@./scripts/validate-phase4.sh

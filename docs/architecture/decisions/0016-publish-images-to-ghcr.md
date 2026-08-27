@@ -9,7 +9,7 @@ GitOps nodes must pull an immutable image rather than depend on a workstation-lo
 
 ## Decision
 
-Publish the exact checksummed CI archive to `ghcr.io/rano1000/golden-path-api`. Publication runs only for reviewed `main` changes affecting image bytes and only after explicit repository-variable approval. The package must be public and linked to this repository before promotion continues. Desired state uses only the registry-generated digest.
+Publish the exact checksummed CI archive to `ghcr.io/rano1000/golden-path-api` through a separate manual workflow. The workflow accepts only a successful forced validation run, requires explicit repository-variable approval and typed immutable confirmation, and never rebuilds. The package must be public and linked to this repository before a separate promotion can continue. Desired state uses only the registry-generated digest.
 
 ## Consequences
 
