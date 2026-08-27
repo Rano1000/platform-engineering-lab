@@ -50,7 +50,7 @@ jobs:
         env:
           CATEGORY: ${{ steps.impact.outputs.category }}
         run: |
-          printf '### Change classification\n\nCategory: `%s`\n' "$CATEGORY" >> "$GITHUB_STEP_SUMMARY"
+          printf "### Change classification\n\nCategory: \`%s\`\n" "$CATEGORY" >> "$GITHUB_STEP_SUMMARY"
 
   repository:
     name: Repository contracts
