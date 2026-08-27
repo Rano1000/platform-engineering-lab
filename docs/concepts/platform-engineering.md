@@ -4,7 +4,7 @@ Platform engineering applies product thinking to the shared systems that softwar
 
 ## Platform contract
 
-A platform contract describes what application teams provide and what the platform guarantees. Future phases of this project will define contracts for health endpoints, resource declarations, deployment configuration, telemetry, security context, and ownership metadata.
+A platform contract describes what application teams provide and what the platform guarantees. Phase 2 defines health, resource, deployment, metrics-endpoint, security-context, and ownership contracts. Later phases add telemetry infrastructure and broader policy enforcement that consume those contracts.
 
 ## Golden path
 

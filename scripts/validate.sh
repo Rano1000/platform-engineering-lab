@@ -212,12 +212,12 @@ PY
     fail 'Python application syntax validation failed.'
   fi
 
-  if grep -Eq '^ARG PYTHON_IMAGE=python:3\.13\.15-slim-trixie@sha256:[0-9a-f]{64}$' "$application/Dockerfile" &&
+  if grep -Eq '^ARG PYTHON_IMAGE=python:3\.13\.15-slim-bookworm@sha256:[0-9a-f]{64}$' "$application/Dockerfile" &&
      grep -Eq '^USER 10001:10001$' "$application/Dockerfile" &&
      grep -Fq "revision=\$(full_revision)" scripts/app.sh &&
      grep -Fq -- "--set-string \"image.revision=\$(full_revision)\"" scripts/app.sh &&
      ! grep -Eiq '(^|[^[:alnum:]])latest([^[:alnum:]]|$)' "$application/Dockerfile" "$chart/values.yaml" &&
-     python3 - "$application/requirements/runtime.txt" "$application/requirements/test.txt" <<'PY'
+     python3 - "$application/requirements/runtime.in" "$application/requirements/test.in" <<'PY'
 import pathlib
 import re
 import sys
@@ -238,6 +238,14 @@ PY
     pass 'application image and dependencies are pinned, non-root, revision-labelled, and never use latest.'
   else
     fail 'application image pin or non-root runtime contract is incomplete.'
+  fi
+
+  if grep -q -- '--require-hashes' "$application/Dockerfile" &&
+     grep -q -- '--hash=sha256:' "$application/requirements/runtime.txt" &&
+     grep -q -- '--hash=sha256:' "$application/requirements/test.txt"; then
+    pass 'application dependency installation uses generated hash locks.'
+  else
+    fail 'application dependency locks or hash enforcement are missing.'
   fi
 
   if has helm; then
@@ -386,9 +394,67 @@ PY
   fi
 }
 
+check_supply_chain() {
+  workflow=.github/workflows/application-ci.yml
+  policy=config/supply-chain/vulnerability-exceptions.json
+  trivy_digest='sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969'
+
+  if python3 scripts/validate-vulnerability-policy.py "$policy" &&
+     ./scripts/supply-chain.sh policy-test &&
+     ./scripts/supply-chain.sh locks; then
+    pass 'vulnerability policy and dependency lock contracts pass.'
+  else
+    fail 'vulnerability policy or dependency lock validation failed.'
+  fi
+
+  if python3 - "$workflow" .github/workflows <<'PY'
+import pathlib, re, sys, yaml
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+document = yaml.safe_load(text)
+errors = []
+for workflow_path in pathlib.Path(sys.argv[2]).glob("*.yml"):
+    for number, line in enumerate(workflow_path.read_text(encoding="utf-8").splitlines(), 1):
+        match = re.search(r"\buses:\s*([^\s#]+)", line)
+        if match and not re.fullmatch(r"[^/@\s]+/[^/@\s]+@[0-9a-f]{40}", match.group(1)):
+            errors.append(f"{workflow_path}:{number}: action is not pinned to a full SHA: {match.group(1)}")
+permissions = document.get("permissions")
+if permissions != {"contents": "read"}:
+    errors.append("workflow default permissions must be contents: read only")
+for name, job in document.get("jobs", {}).items():
+    job_permissions = job.get("permissions")
+    if name == "attest":
+        expected = {"contents": "read", "id-token": "write", "attestations": "write"}
+        if job_permissions != expected:
+            errors.append(f"attest permissions differ from {expected}")
+    elif job_permissions is not None:
+        errors.append(f"job {name} unexpectedly overrides permissions")
+if "pull_request_target" in text:
+    errors.append("pull_request_target is forbidden")
+if errors:
+    print("\n".join(errors))
+    raise SystemExit(1)
+PY
+  then
+    pass 'application CI actions and permissions follow the immutable least-privilege contract.'
+  else
+    fail 'application CI action pins or permissions are unsafe.'
+  fi
+
+  if grep -Fq "TRIVY_VERSION=0.74.0" scripts/lib/supply-chain-common.sh &&
+     grep -Fq "@$trivy_digest" scripts/lib/supply-chain-common.sh &&
+     grep -Fq 'retention-days: 14' "$workflow" &&
+     ! grep -Eq 'packages:[[:space:]]*write|pull_request_target|:[[:space:]]*latest([^[:alnum:]]|$)' "$workflow" scripts/lib/supply-chain-common.sh; then
+    pass 'Trivy, artifact retention, and no-publication boundaries are pinned.'
+  else
+    fail 'supply-chain version, retention, or publication boundary is incorrect.'
+  fi
+}
+
 case "$MODE" in
-  all) check_format; check_links; check_secrets; check_make; check_shell; check_markdown; check_yaml; check_platform; check_application ;;
-  lint) check_make; check_shell; check_markdown; check_yaml; check_platform; check_application ;;
+  all) check_format; check_links; check_secrets; check_make; check_shell; check_markdown; check_yaml; check_platform; check_application; check_supply_chain ;;
+  lint) check_make; check_shell; check_markdown; check_yaml; check_platform; check_application; check_supply_chain ;;
   docs) check_markdown; check_links ;;
   *) printf 'usage: %s {all|lint|docs}\n' "$0" >&2; exit 2 ;;
 esac

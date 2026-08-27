@@ -36,7 +36,7 @@ All nodes are containers on one workstation. They share the host's CPU, memory, 
 
 The API server, HTTP, and HTTPS mappings bind only to `127.0.0.1`. Docker maps host ports 80 and 443 to control-plane container ports 30080 and 30443. Those internal ports are reserved for Traefik's fixed NodePort Service; the user-facing localhost addresses do not change. The cluster uses IPv4, Pod subnet `10.244.0.0/16`, and Service subnet `10.96.0.0/16`.
 
-The control-plane node carries `ingress-ready=true`, which is the scheduling label used by the planned Traefik Gateway controller. Phase 1 reserves ports but does not install a Gateway controller. Because kind port mappings cannot be changed on a running cluster, the existing cluster requires one separately approved recreation after repository review and commit.
+The control-plane node carries `ingress-ready=true`, which schedules the Phase 2 Traefik Gateway controller. Phase 1 reserves ports but does not install that controller. The maintained lab has the current mappings; older clusters still require inventory and separate recreation approval because kind port mappings are immutable.
 
 Owned namespaces begin with default-deny ingress and egress. DNS queries to CoreDNS over TCP and UDP port 53 are the only initial exception. Later components must add narrowly scoped rules for application ingress, metrics collection, Git access, Kubernetes API access, and approved service dependencies.
 

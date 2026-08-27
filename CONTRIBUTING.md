@@ -16,9 +16,12 @@ Create a focused branch from `main`, make the smallest coherent change, and run:
 ```sh
 make doctor
 make validate
+make ci-check
 ```
 
 `make doctor` reports environmental readiness. `make validate` performs repository checks and must not modify infrastructure.
+
+Application dependency changes start in the `.in` files and require regeneration with the pinned containerized pip-tools environment. Never hand-edit generated hashes. Dependabot proposals are review requests, not automatic approvals or merges.
 
 Pull requests should state the problem, the chosen approach, validation performed, operational or security implications, and documentation changes. Breaking changes require an ADR and a changelog entry.
 

@@ -15,7 +15,7 @@ make validate
 
 The host must have ports 80 and 443 available on `127.0.0.1`. Three nodes require roughly 2.5–4 GiB before application and platform workloads are added; 8 GiB host memory is recommended.
 
-The configuration maps those host ports to control-plane container ports 30080 and 30443 for the future Traefik NodePort Service. Local URLs remain unchanged. kind cannot update port mappings in place, so an existing cluster must be inventoried and recreated once after this repository change has been reviewed and committed. Recreation requires separate approval.
+The configuration maps those host ports to control-plane container ports 30080 and 30443 for the Phase 2 Traefik NodePort Service. Local URLs remain unchanged. Fresh clusters receive the mappings immediately. Older clusters require inventory and separate recreation approval because kind cannot update mappings in place.
 
 ## Protect an existing cluster
 

@@ -1,4 +1,4 @@
-ARG PYTHON_IMAGE=python:3.13.15-slim-trixie@sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a
+ARG PYTHON_IMAGE=python:3.13.15-slim-bookworm@sha256:c45a22ea000adfd9cda29364bbe7edd23001ce5cc2ad15857cfbf7766943b9ca
 
 FROM ${PYTHON_IMAGE} AS dependencies
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -7,16 +7,19 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PATH=/opt/venv/bin:$PATH
 WORKDIR /build
 COPY requirements/runtime.txt requirements/runtime.txt
-RUN python -m venv /opt/venv && python -m pip install --no-compile -r requirements/runtime.txt
+RUN python -m venv /opt/venv && python -m pip install --no-compile --require-hashes -r requirements/runtime.txt
 
 FROM dependencies AS test
 COPY requirements/test.txt requirements/test.txt
-RUN python -m pip install --no-compile -r requirements/test.txt
+RUN python -m pip install --no-compile --require-hashes -r requirements/test.txt
 COPY pyproject.toml ./
 COPY src/ src/
 COPY tests/ tests/
 ENV PYTHONPATH=/build/src
 RUN python -m pytest
+
+FROM dependencies AS runtime-dependencies
+RUN python -m pip uninstall --yes pip setuptools
 
 FROM ${PYTHON_IMAGE} AS runtime
 ARG APP_VERSION
@@ -32,8 +35,9 @@ ENV HOME=/tmp \
     PYTHONPATH=/app \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
+RUN python -m pip uninstall --yes pip setuptools
 RUN groupadd --gid 10001 app && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app
-COPY --from=dependencies /opt/venv/ /opt/venv/
+COPY --from=runtime-dependencies /opt/venv/ /opt/venv/
 COPY --chown=10001:10001 src/ /app/
 WORKDIR /app
 USER 10001:10001

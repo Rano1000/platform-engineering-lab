@@ -6,12 +6,19 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Added
 
+- Phase 3 workload and supply-chain validation with a build-once image artifact, CycloneDX SBOM, vulnerability policy, artifact attestations, and weekly dependency update proposals.
+- Hash-locked Python dependencies and a pinned containerized lock compiler.
 - Phase 2 golden-path FastAPI source, secure container definition, Helm chart, Traefik Gateway API configuration, guarded automation, and documentation.
 - Phase 0 repository governance, architecture documentation, diagnostics, and validation.
 - Phase 1 three-node kind configuration, namespace baseline, resource controls, network isolation, guarded lifecycle automation, runtime validation, and operational documentation.
 
+### Changed
+
+- Record completion of the Phase 2 runtime gate while preserving fresh-environment installation caveats.
+
 ### Fixed
 
+- Refresh Python dependencies and use the fixed Bookworm base after the supply-chain gate identified fixable HIGH vulnerabilities.
 - Validate scalar EndpointSlice readiness, use authorized in-cluster clients, and secure temporary network-test Pods.
 - Give the application ten seconds to bind its listening socket before startup probes begin.
 - Validate Traefik's digest-only runtime image reference and disable unnecessary outbound version checks.

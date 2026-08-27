@@ -17,7 +17,7 @@
 
 The node image tag and SHA-256 digest are pinned in `platform/bootstrap/kind/cluster.yaml`. Upgrade kind and Kubernetes together by selecting an image listed in the target stable kind release, updating the version constants and Pod Security version labels, recreating the disposable cluster, and running all static and runtime validation.
 
-The internal ports are fixed Kubernetes NodePorts used by the planned Traefik Service. The host remains exposed only on loopback at conventional ports 80 and 443. kind port mappings are immutable after cluster creation, so adopting this Phase 2 mapping requires one separately reviewed and approved cluster recreation after the repository change is committed.
+The internal ports are fixed Kubernetes NodePorts used by the Phase 2 Traefik Service. The maintained cluster has the current mapping. The host remains exposed only on loopback at conventional ports 80 and 443. Older clusters require separately approved recreation because kind port mappings are immutable.
 
 kind v0.31.0 generates kubeadm v1beta3 configuration for Kubernetes 1.35.x, so the ingress node-label patch deliberately uses `kubeadm.k8s.io/v1beta3` and its map-form `kubeletExtraArgs`. kind changes its generated configuration to v1beta4 for Kubernetes 1.36+, where the equivalent arguments use `name` and `value` entries. A Kubernetes upgrade across that boundary must update the patch structure in the same change.
 
@@ -39,7 +39,7 @@ Containers without explicit resources receive requests of 100 millicores and 128
 
 ## Networking
 
-Every owned namespace denies ingress and egress by default. A second policy permits DNS queries only to CoreDNS. Phase 2 application traffic and later platform-controller traffic require explicit policy additions before they can communicate.
+Every owned namespace denies ingress and egress by default. A second policy permits DNS queries only to CoreDNS. Phase 2 adds narrow controller, application, and metrics-test flows; later components require their own explicit policies.
 
 ## Storage
 

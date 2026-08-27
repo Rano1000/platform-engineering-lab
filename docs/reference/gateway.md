@@ -20,7 +20,7 @@ Only the Kubernetes Gateway provider is enabled. Provider namespace watching is 
 
 `gateway-install` verifies the chart's OCI digest and archive checksum and verifies the versioned Gateway API bundle checksum before making any cluster change. It then installs the Standard-channel CRDs, network policy, chart, and platform Gateway. `gateway-uninstall` removes the Gateway and chart release after exact confirmation but preserves shared cluster-scoped Gateway API CRDs.
 
-The existing kind cluster must be recreated once before installation because kind port mappings are immutable. That recreation is a separately approved operation performed only after repository review and commit; localhost exposure remains unchanged from the user's perspective.
+The maintained kind cluster has the required immutable mappings. A cluster created from an older configuration must be inventoried and separately approved for recreation before installation; localhost exposure remains unchanged from the user's perspective.
 
 The Traefik service account must retain token automount because its controller needs authenticated Kubernetes API access. This is a controller-specific exception; the application service account disables token automount.
 
@@ -28,4 +28,4 @@ The Traefik service account must retain token automount because its controller n
 
 The Traefik policy admits its HTTP and HTTPS entry-point ports because NodePort source addresses depend on kind, Docker, kube-proxy, and CNI packet-processing order. It allows egress to the fixed Kubernetes Service IP `10.96.0.1/32` on TCP 443, to labelled application Pods on TCP 8080, and to labelled CoreDNS Pods on TCP and UDP 53. Kubernetes permits node-to-local-Pod traffic for kubelet probes, so the management port is not opened by policy.
 
-The API Service IP rule and preservation of the original localhost source through `externalTrafficPolicy: Local` require runtime validation. They must not be treated as confirmed until tested with the recreated cluster and its active CNI.
+Runtime validation confirmed controller API and DNS access and the required application path. Docker and kind translated localhost traffic to source address `172.18.0.1` at Traefik, so `externalTrafficPolicy: Local` avoids a second Service hop but does not preserve the original localhost address end to end. Revalidate the policy after CNI or Docker-network changes.

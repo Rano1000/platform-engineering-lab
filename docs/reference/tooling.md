@@ -23,3 +23,5 @@ Phase 1 pins Kubernetes v1.35.0 to the immutable node-image digest recorded in `
 To upgrade, select a node image and digest published in the target stable kind release, update all node entries, the runtime version constants, and Pod Security version labels together, then recreate the disposable cluster only after reviewing its workloads and persistent volumes.
 
 Phase 2 pins Traefik Proxy v3.7.10, Traefik chart 41.2.0, and Gateway API Standard CRDs v1.6.1. Upgrade all three only after reviewing their primary-source compatibility notes and rendered RBAC. Python dependencies and the base image are also pinned; application upgrades require a new version and revision-labelled image tag.
+
+Phase 3 uses pip-tools 7.6.1 in a pinned Python container to generate requirement hashes. The Python 3.13.15 slim-bookworm base is pinned to its 2026-08-25 multi-platform security refresh; Bookworm replaces the Trivy-vulnerable Trixie snapshot found during the Phase 3 review. Trivy 0.74.0 runs from the complete multi-platform image digest recorded in ADR-0014. GitHub Actions use full commit pins; upgrades require matching each commit to an official release.

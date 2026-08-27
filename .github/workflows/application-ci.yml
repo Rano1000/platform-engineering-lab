@@ -1,0 +1,211 @@
+name: Application supply chain
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: application-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ARTIFACT_DIR: .artifacts/supply-chain
+
+jobs:
+  repository:
+    name: Repository contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned validation tools
+        run: |
+          python3 -m pip install --disable-pip-version-check yamllint==1.37.1
+          npm install --global markdownlint-cli2@0.18.1
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Validate repository and policy
+        run: make ci-check
+
+      - name: Summarize repository validation
+        if: always()
+        run: |
+          {
+            echo '### Repository contracts'
+            echo
+            echo "Revision: \`${GITHUB_SHA}\`"
+            echo "Result: **${{ job.status }}**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  image:
+    name: Test and build once
+    needs: repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      image-reference: ${{ steps.identity.outputs.reference }}
+      archive-sha256: ${{ steps.identity.outputs.archive_sha256 }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Run unit tests
+        run: make app-test
+
+      - name: Build and export immutable image once
+        run: make app-image-artifact
+
+      - name: Record image identity
+        id: identity
+        run: |
+          reference="golden-path-api:0.1.0-${GITHUB_SHA::12}"
+          archive_sha256=$(cut -d ' ' -f 1 "$ARTIFACT_DIR/golden-path-api.tar.sha256")
+          echo "reference=$reference" >> "$GITHUB_OUTPUT"
+          echo "archive_sha256=$archive_sha256" >> "$GITHUB_OUTPUT"
+          {
+            echo '### Immutable image'
+            echo
+            echo "Image: \`$reference\`"
+            echo "OCI revision: \`$GITHUB_SHA\`"
+            echo "Archive SHA-256: \`$archive_sha256\`"
+            echo 'Unit tests: **passed**'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload immutable image archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: golden-path-image-${{ github.sha }}
+          path: |
+            .artifacts/supply-chain/golden-path-api.tar
+            .artifacts/supply-chain/golden-path-api.tar.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  supply-chain:
+    name: SBOM and vulnerability policy
+    needs: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Download immutable image archive
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
+        with:
+          name: golden-path-image-${{ github.sha }}
+          path: .artifacts/supply-chain
+
+      - name: Verify and load image archive
+        run: |
+          ./scripts/supply-chain.sh load-artifact
+          make app-image-inspect
+
+      - name: Scan repository for secrets
+        run: make supply-chain-secret-scan
+
+      - name: Generate CycloneDX SBOM
+        run: make app-sbom
+
+      - name: Enforce vulnerability policy
+        run: make app-scan
+
+      - name: Add evidence to job summary
+        run: |
+          python3 - "$ARTIFACT_DIR/sbom-metadata.json" "$ARTIFACT_DIR/scan-summary.json" "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, pathlib, sys
+          sbom = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          scan = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
+          database = scan.get("database", {})
+          with pathlib.Path(sys.argv[3]).open("a", encoding="utf-8") as summary:
+              summary.write("### Supply-chain evidence\n\n")
+              summary.write(f"SBOM SHA-256: `{sbom['artifactSha256']}`\n\n")
+              summary.write(f"Findings by severity: `{scan['findingsBySeverity']}`\n\n")
+              summary.write(f"Findings by fix availability: `{scan['findingsByFixAvailability']}`\n\n")
+              summary.write(f"Trivy: `{scan['scanner']['version']}`\n\n")
+              summary.write(f"Vulnerability database updated: `{database.get('UpdatedAt', 'unavailable')}`\n")
+          PY
+
+      - name: Summarize supply-chain results
+        if: always()
+        run: |
+          {
+            echo '### Supply-chain validation'
+            echo
+            echo "Image: \`${{ needs.image.outputs.image-reference }}\`"
+            echo "Archive SHA-256: \`${{ needs.image.outputs.archive-sha256 }}\`"
+            echo "Result: **${{ job.status }}**"
+            echo 'The JSON report includes unfixed findings; only unexcepted, fixable HIGH or CRITICAL findings fail this gate.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload SBOM and reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: golden-path-supply-chain-${{ github.sha }}
+          path: |
+            .artifacts/supply-chain/golden-path-api.cdx.json
+            .artifacts/supply-chain/golden-path-api.cdx.json.sha256
+            .artifacts/supply-chain/sbom-metadata.json
+            .artifacts/supply-chain/scan-summary.json
+            .artifacts/supply-chain/trivy-metadata.json
+            .artifacts/supply-chain/trivy-vulnerabilities.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  attest:
+    name: Attest workflow artifacts
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [image, supply-chain]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download image archive
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
+        with:
+          name: golden-path-image-${{ github.sha }}
+          path: artifacts/image
+
+      - name: Download SBOM and reports
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
+        with:
+          name: golden-path-supply-chain-${{ github.sha }}
+          path: artifacts/supply-chain
+
+      - name: Attest image archive and SBOM
+        id: attestation
+        continue-on-error: true
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
+        with:
+          subject-path: |
+            artifacts/image/golden-path-api.tar
+            artifacts/supply-chain/golden-path-api.cdx.json
+
+      - name: Summarize attestation
+        if: always()
+        run: |
+          {
+            echo '### Artifact attestation'
+            echo
+            echo "Result: **${{ steps.attestation.outcome }}**"
+            echo 'Attestation availability is optional; validation artifacts remain checksummed and retained for 14 days.'
+          } >> "$GITHUB_STEP_SUMMARY"

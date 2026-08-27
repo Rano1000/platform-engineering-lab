@@ -1,6 +1,6 @@
 # Deploy the golden-path application
 
-This procedure is planned for the separately approved Phase 2 runtime operation. Review each mutating command before use.
+This is the repeatable procedure used for the completed Phase 2 runtime gate. A fresh environment still requires separate approval for every mutating step.
 
 ## Validate repository content
 

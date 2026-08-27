@@ -28,6 +28,7 @@ override.tf.json
 .cache/
 coverage/
 dist/
+.artifacts/
 # Python test and bytecode output
 __pycache__/
 *.py[cod]

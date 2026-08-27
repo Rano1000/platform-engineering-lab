@@ -4,7 +4,7 @@
 
 Platform Engineering Lab is a reference environment for evaluating platform contracts and operating practices. It favors transparent components and version-controlled state over opaque automation.
 
-Phase 1 defines a reproducible local Kubernetes baseline. Phase 2 defines a reference workload and Gateway API delivery path. Repository configuration exists, but cluster state must be validated independently and is not implied by this documentation.
+Phase 1 defines a reproducible local Kubernetes baseline. Phase 2 defines a reference workload and Gateway API delivery path and has been runtime-validated in the maintained lab environment. Phase 3 validates workload and supply-chain artifacts without contacting Kubernetes. Fresh environments still require explicit runtime validation.
 
 ## Planned system context
 
@@ -25,8 +25,9 @@ flowchart TB
 - **Repository foundation:** governance, decisions, documentation, diagnostics, and validation. Implemented.
 - **Kubernetes baseline:** defines a guarded three-node local cluster, namespaces, and baseline controls. Repository implementation is available; runtime state is environment-dependent.
 - **GitOps bootstrap:** installs the minimum GitOps entry point. Planned for Phase 4.
-- **Platform services:** Traefik Gateway API configuration is available in Phase 2; policy and monitoring services remain planned.
-- **Workloads:** the independently packaged golden-path API is available in Phase 2; runtime deployment remains environment-dependent.
+- **Platform services:** Traefik and Gateway API routing were runtime-validated in Phase 2; policy and monitoring services remain planned.
+- **Workloads:** the independently packaged golden-path API was runtime-validated in Phase 2; deployment remains environment-specific.
+- **Delivery validation:** Phase 3 builds one immutable image, validates its contract, produces a CycloneDX SBOM, and enforces the vulnerability policy without deployment credentials.
 - **Infrastructure:** optional provisioning outside Kubernetes. Planned for a cloud extension.
 
 Git will be the source of desired configuration. CI will validate proposed state; Argo CD will eventually reconcile accepted state. Direct cluster access remains a diagnostic and recovery mechanism rather than the normal delivery path.
@@ -53,3 +54,6 @@ Git will be the source of desired configuration. CI will validate proposed state
 - [ADR-0010: Use a minimal non-root application container](decisions/0010-use-a-minimal-container.md)
 - [ADR-0011: Package the reference application with Helm](decisions/0011-package-applications-with-helm.md)
 - [ADR-0012: Use Traefik with Kubernetes Gateway API](decisions/0012-use-traefik-with-gateway-api.md)
+- [ADR-0013: Build an application image once in CI](decisions/0013-build-an-application-image-once-in-ci.md)
+- [ADR-0014: Generate an SBOM and enforce vulnerability policy](decisions/0014-generate-an-sbom-and-enforce-vulnerability-policy.md)
+- [ADR-0015: Separate CI validation from deployment](decisions/0015-separate-ci-validation-from-deployment.md)

@@ -1,6 +1,6 @@
 # Golden-path application architecture
 
-Phase 2 defines a stateless FastAPI service, a secure image contract, Helm packaging, and Gateway API routing. Runtime installation remains a separate, explicitly approved operation.
+Phase 2 defines a stateless FastAPI service, a secure image contract, Helm packaging, and Gateway API routing. The maintained lab deployment passed routing, isolation, recovery, and security validation. Fresh environments still require separately approved installation.
 
 ```mermaid
 flowchart LR

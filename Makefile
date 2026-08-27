@@ -2,7 +2,7 @@ SHELL := /bin/sh
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor validate lint docs-check cluster-create cluster-status cluster-validate cluster-destroy cluster-recreate namespaces-apply policies-apply app-test app-build app-load app-deploy app-status app-validate app-uninstall app-network-test app-recovery-test gateway-install gateway-status gateway-validate gateway-uninstall
+.PHONY: help doctor validate lint docs-check cluster-create cluster-status cluster-validate cluster-destroy cluster-recreate namespaces-apply policies-apply app-test app-build app-load app-deploy app-status app-validate app-uninstall app-network-test app-recovery-test gateway-install gateway-status gateway-validate gateway-uninstall dependency-locks-check dependency-locks-update supply-chain-policy-test supply-chain-secret-scan app-image-artifact app-image-inspect app-sbom app-scan ci-check
 
 help: ## Show available targets.
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -18,6 +18,32 @@ lint: ## Lint Markdown, YAML, shell, Make, and GitHub workflow files.
 
 docs-check: ## Check Markdown formatting and internal documentation links.
 	@./scripts/validate.sh docs
+
+dependency-locks-check: ## Confirm Python installs require generated package hashes.
+	@./scripts/supply-chain.sh locks
+
+dependency-locks-update: ## Regenerate Python locks with the pinned compiler (mutating).
+	@./scripts/supply-chain.sh locks-update
+
+supply-chain-policy-test: ## Test vulnerability exception validation and expiry handling.
+	@./scripts/supply-chain.sh policy-test
+
+supply-chain-secret-scan: ## Scan repository content using the pinned Trivy image.
+	@./scripts/supply-chain.sh secret-scan
+
+app-image-artifact: ## Build the image once and export its checksummed archive.
+	@./scripts/supply-chain.sh build-artifact
+
+app-image-inspect: ## Inspect the immutable application image contract.
+	@./scripts/supply-chain.sh inspect
+
+app-sbom: ## Generate and validate the CycloneDX application SBOM.
+	@./scripts/supply-chain.sh sbom
+
+app-scan: ## Report vulnerabilities and reject fixable HIGH or CRITICAL findings.
+	@./scripts/supply-chain.sh scan
+
+ci-check: validate dependency-locks-check supply-chain-policy-test ## Run non-cluster CI contract checks.
 
 cluster-create: ## Create the exact local lab cluster and apply its baseline (mutating).
 	@./scripts/cluster.sh create
