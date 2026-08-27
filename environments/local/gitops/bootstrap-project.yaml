@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform-bootstrap
+  namespace: gitops
+  labels:
+    app.kubernetes.io/managed-by: platform-engineering-lab
+spec:
+  description: Manages reviewed child Application definitions only.
+  sourceRepos:
+    - https://github.com/Rano1000/platform-engineering-lab.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: gitops
+  clusterResourceBlacklist:
+    - group: "*"
+      kind: "*"
+  namespaceResourceWhitelist:
+    - group: argoproj.io
+      kind: Application

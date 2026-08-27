@@ -4,7 +4,8 @@
 
 | Item | Value |
 | --- | --- |
-| Image | `golden-path-api:0.1.0-<12-character-git-sha>` |
+| Local image | `golden-path-api:0.1.0-<12-character-git-sha>` |
+| GitOps image | `ghcr.io/rano1000/golden-path-api@sha256:<complete-digest>` |
 | Namespace | `platform-apps` |
 | Helm release | `golden-path` |
 | Replicas | 2 |
@@ -12,7 +13,7 @@
 | Runtime identity | UID/GID 10001 |
 | Public hostname | `golden-path-api.localhost` |
 
-The build refuses uncommitted application/chart sources and refuses to replace an existing revision tag. The tag uses the first 12 Git revision characters and the OCI revision label uses all 40. `imagePullPolicy: Never` prevents registry fallback after the image is loaded into kind.
+The local build refuses uncommitted image inputs and refuses to replace an existing revision tag. The tag uses the first 12 Git revision characters and the OCI revision label uses all 40. Local deployment retains `imagePullPolicy: Never`; reviewed GitOps state uses the public registry digest and `IfNotPresent`. Mutable registry tags are never promoted.
 
 ## Endpoints
 
@@ -23,7 +24,7 @@ The build refuses uncommitted application/chart sources and refuses to replace a
 
 ## Commands
 
-Read-only commands are `make app-status` and `make app-validate`. Build, load, deploy, uninstall, network-test, and recovery-test targets change local Docker or the exact lab cluster and must be used deliberately.
+Read-only commands are `make app-status`, `make app-validate`, and `make app-ownership-status`. Build, load, deploy, uninstall, network-test, and recovery-test targets change local Docker or the exact lab cluster and must be used deliberately. Helm deployment and uninstall refuse to run after the repository-owned Argo Application exists.
 
 `make app-network-test` creates uniquely named Pods in `observability`, proves labelled metrics traffic is allowed and unlabelled traffic is denied, and removes both Pods through a cleanup trap.
 

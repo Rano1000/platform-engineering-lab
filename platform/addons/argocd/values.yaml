@@ -1,0 +1,135 @@
+global:
+  image:
+    repository: quay.io/argoproj/argocd
+    tag: v3.5.2@sha256:e2aadfae709d904e87f46ba4aa49601d827b3022db22cd4d03aae816a2e7097b
+    imagePullPolicy: IfNotPresent
+  logging:
+    format: json
+    level: info
+  networkPolicy:
+    create: false
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+
+crds:
+  install: true
+  keep: true
+
+configs:
+  cm:
+    admin.enabled: false
+    application.resourceTrackingMethod: annotation
+    exec.enabled: false
+    statusbadge.enabled: false
+
+controller:
+  replicas: 1
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+  containerSecurityContext: &argocdSecurityContext
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+  clusterRoleRules:
+    enabled: true
+    rules:
+      - apiGroups: [""]
+        resources: [configmaps, services, serviceaccounts]
+        verbs: [get, list, watch, create, update, patch, delete]
+      - apiGroups: [apps]
+        resources: [deployments]
+        verbs: [get, list, watch, create, update, patch, delete]
+      - apiGroups: [policy]
+        resources: [poddisruptionbudgets]
+        verbs: [get, list, watch, create, update, patch, delete]
+      - apiGroups: [networking.k8s.io]
+        resources: [networkpolicies]
+        verbs: [get, list, watch, create, update, patch, delete]
+      - apiGroups: [gateway.networking.k8s.io]
+        resources: [httproutes]
+        verbs: [get, list, watch, create, update, patch, delete]
+      - apiGroups: [""]
+        resources: [namespaces, pods]
+        verbs: [get, list, watch]
+      - apiGroups: [""]
+        resources: [events]
+        verbs: [get, list, watch, create, patch]
+      - apiGroups: [apps]
+        resources: [replicasets]
+        verbs: [get, list, watch]
+      - apiGroups: [discovery.k8s.io]
+        resources: [endpointslices]
+        verbs: [get, list, watch]
+
+repoServer:
+  replicas: 1
+  automountServiceAccountToken: false
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+  containerSecurityContext: *argocdSecurityContext
+
+server:
+  replicas: 1
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: false
+  route:
+    enabled: false
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 250m, memory: 256Mi}
+  containerSecurityContext: *argocdSecurityContext
+  clusterRoleRules:
+    enabled: true
+    rules:
+      - apiGroups: [""]
+        resources: [namespaces]
+        verbs: [get, list]
+
+redis:
+  enabled: true
+  image:
+    repository: docker.io/library/redis
+    tag: 8.6.4-alpine@sha256:2cc044fc5a07c9b701f8f1255a309ae9ad7856e694ac03513bf3648c01e40763
+  exporter:
+    enabled: false
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 100m, memory: 128Mi}
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+
+redisSecretInit:
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {cpu: 100m, memory: 64Mi}
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+
+dex:
+  enabled: false
+
+applicationSet:
+  replicas: 0
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 100m, memory: 128Mi}
+  containerSecurityContext: *argocdSecurityContext
+
+notifications:
+  enabled: false

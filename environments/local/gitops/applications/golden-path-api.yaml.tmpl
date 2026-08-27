@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: golden-path-api
+  namespace: gitops
+  labels:
+    app.kubernetes.io/managed-by: platform-engineering-lab
+  annotations:
+    platform.engineering-lab/chart-revision: "${CHART_REVISION}"
+    platform.engineering-lab/image-source-revision: "${IMAGE_SOURCE_REVISION}"
+    platform.engineering-lab/image-digest: "${IMAGE_DIGEST}"
+    platform.engineering-lab/evidence-file: ../evidence/golden-path-api.json
+spec:
+  project: platform-apps
+  source:
+    repoURL: https://github.com/Rano1000/platform-engineering-lab.git
+    targetRevision: "${CHART_REVISION}"
+    path: charts/golden-path-api
+    helm:
+      releaseName: golden-path
+      valuesObject:
+        image:
+          repository: ghcr.io/rano1000/golden-path-api
+          tag: ""
+          digest: "${IMAGE_DIGEST}"
+          revision: "${IMAGE_SOURCE_REVISION}"
+          pullPolicy: IfNotPresent
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform-apps
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false

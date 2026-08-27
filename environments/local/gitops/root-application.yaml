@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-environment
+  namespace: gitops
+  labels:
+    app.kubernetes.io/managed-by: platform-engineering-lab
+spec:
+  project: platform-bootstrap
+  source:
+    repoURL: https://github.com/Rano1000/platform-engineering-lab.git
+    targetRevision: main
+    path: environments/local/gitops/applications
+    directory:
+      include: "*.yaml"
+      recurse: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitops
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false

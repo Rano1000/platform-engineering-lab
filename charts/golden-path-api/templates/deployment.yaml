@@ -48,7 +48,11 @@ spec:
               {{- include "golden-path-api.selectorLabels" . | nindent 14 }}
       containers:
         - name: api
-          image: "{{ .Values.image.repository }}:{{ required "image.tag is required" .Values.image.tag }}"
+          {{- if .Values.image.digest }}
+          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          {{- else }}
+          image: "{{ .Values.image.repository }}:{{ required "image.tag is required when image.digest is empty" .Values.image.tag }}"
+          {{- end }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false

@@ -8,13 +8,31 @@
     "image": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repository", "tag", "revision", "pullPolicy"],
+      "required": ["repository", "tag", "digest", "revision", "pullPolicy"],
       "properties": {
         "repository": {"type": "string", "minLength": 1},
-        "tag": {"type": "string", "pattern": "^0\\.1\\.0-[0-9a-f]{12}$"},
+        "tag": {"type": "string", "pattern": "^(|0\\.1\\.0-[0-9a-f]{12})$"},
+        "digest": {"type": "string", "pattern": "^(|sha256:[0-9a-f]{64})$"},
         "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-        "pullPolicy": {"type": "string", "const": "Never"}
-      }
+        "pullPolicy": {"type": "string", "enum": ["Never", "IfNotPresent"]}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "tag": {"pattern": "^0\\.1\\.0-[0-9a-f]{12}$"},
+            "digest": {"const": ""},
+            "pullPolicy": {"const": "Never"}
+          }
+        },
+        {
+          "properties": {
+            "repository": {"const": "ghcr.io/rano1000/golden-path-api"},
+            "tag": {"const": ""},
+            "digest": {"pattern": "^sha256:[0-9a-f]{64}$"},
+            "pullPolicy": {"const": "IfNotPresent"}
+          }
+        }
+      ]
     },
     "config": {
       "type": "object",

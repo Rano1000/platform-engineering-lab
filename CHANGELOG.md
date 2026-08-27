@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Added
 
+- Phase 4 repository contracts for verified public-image publication, reviewed immutable-digest promotion, and manual Argo CD reconciliation.
+- A restricted local AppProject, digest-only desired-state template, lightweight pinned Argo CD configuration, and guarded GitOps ownership commands.
+- A restricted root Application for merged desired-state detection and separate chart-only promotion without image rebuilds.
 - Phase 3 workload and supply-chain validation with a build-once image artifact, CycloneDX SBOM, vulnerability policy, artifact attestations, and weekly dependency update proposals.
 - Hash-locked Python dependencies and a pinned containerized lock compiler.
 - Phase 2 golden-path FastAPI source, secure container definition, Helm chart, Traefik Gateway API configuration, guarded automation, and documentation.
@@ -14,6 +17,10 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Changed
 
+- Record Phase 3 CI as complete and preserve its residual vulnerability and attestation-verification risks in the Phase 4 promotion evidence.
+- Support immutable registry digests in the application chart while preserving the Phase 2 local-tag workflow.
+- Separate chart, image-source, OCI, SBOM, and vulnerability-report identities in promotion evidence.
+- Resolve root reconciliation to an immutable environment revision and verify a deterministic child-specification checksum before and after synchronization.
 - Record completion of the Phase 2 runtime gate while preserving fresh-environment installation caveats.
 
 ### Fixed

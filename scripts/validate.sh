@@ -422,12 +422,19 @@ for workflow_path in pathlib.Path(sys.argv[2]).glob("*.yml"):
 permissions = document.get("permissions")
 if permissions != {"contents": "read"}:
     errors.append("workflow default permissions must be contents: read only")
+expected_overrides = {
+    "attest-artifacts": {"contents": "read", "id-token": "write", "attestations": "write"},
+    "publish": {"contents": "read", "packages": "write"},
+    "attest-image": {"contents": "read", "id-token": "write", "attestations": "write"},
+    "promote": {"contents": "write", "pull-requests": "write"},
+    "chart-promotion": {"contents": "write", "pull-requests": "write"},
+}
 for name, job in document.get("jobs", {}).items():
     job_permissions = job.get("permissions")
-    if name == "attest":
-        expected = {"contents": "read", "id-token": "write", "attestations": "write"}
+    if name in expected_overrides:
+        expected = expected_overrides[name]
         if job_permissions != expected:
-            errors.append(f"attest permissions differ from {expected}")
+            errors.append(f"{name} permissions differ from {expected}")
     elif job_permissions is not None:
         errors.append(f"job {name} unexpectedly overrides permissions")
 if "pull_request_target" in text:
@@ -445,16 +452,29 @@ PY
   if grep -Fq "TRIVY_VERSION=0.74.0" scripts/lib/supply-chain-common.sh &&
      grep -Fq "@$trivy_digest" scripts/lib/supply-chain-common.sh &&
      grep -Fq 'retention-days: 14' "$workflow" &&
-     ! grep -Eq 'packages:[[:space:]]*write|pull_request_target|:[[:space:]]*latest([^[:alnum:]]|$)' "$workflow" scripts/lib/supply-chain-common.sh; then
-    pass 'Trivy, artifact retention, and no-publication boundaries are pinned.'
+     [ "$(grep -Ec '^[[:space:]]+packages: write$' "$workflow")" -eq 1 ] &&
+     ! grep -Eq 'pull_request_target|:[[:space:]]*latest([^[:alnum:]]|$)' "$workflow" scripts/lib/supply-chain-common.sh; then
+    pass 'Trivy, artifact retention, and least-privilege publication boundaries are pinned.'
   else
     fail 'supply-chain version, retention, or publication boundary is incorrect.'
   fi
 }
 
+check_phase4() {
+  if ! has helm; then
+    warn 'helm is unavailable; Phase 4 chart validation was not run.'
+    return
+  fi
+  if ./scripts/validate-phase4.sh; then
+    pass 'Phase 4 GitOps and promotion contracts pass.'
+  else
+    fail 'Phase 4 GitOps or promotion validation failed.'
+  fi
+}
+
 case "$MODE" in
-  all) check_format; check_links; check_secrets; check_make; check_shell; check_markdown; check_yaml; check_platform; check_application; check_supply_chain ;;
-  lint) check_make; check_shell; check_markdown; check_yaml; check_platform; check_application; check_supply_chain ;;
+  all) check_format; check_links; check_secrets; check_make; check_shell; check_markdown; check_yaml; check_platform; check_application; check_supply_chain; check_phase4 ;;
+  lint) check_make; check_shell; check_markdown; check_yaml; check_platform; check_application; check_supply_chain; check_phase4 ;;
   docs) check_markdown; check_links ;;
   *) printf 'usage: %s {all|lint|docs}\n' "$0" >&2; exit 2 ;;
 esac

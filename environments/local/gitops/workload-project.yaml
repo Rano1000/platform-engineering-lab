@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform-apps
+  namespace: gitops
+  labels:
+    app.kubernetes.io/managed-by: platform-engineering-lab
+spec:
+  description: Golden Path workloads owned by the local platform environment.
+  sourceRepos:
+    - https://github.com/Rano1000/platform-engineering-lab.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: platform-apps
+  clusterResourceBlacklist:
+    - group: "*"
+      kind: "*"
+  namespaceResourceWhitelist:
+    - {group: "", kind: ConfigMap}
+    - {group: "", kind: Service}
+    - {group: "", kind: ServiceAccount}
+    - {group: apps, kind: Deployment}
+    - {group: policy, kind: PodDisruptionBudget}
+    - {group: networking.k8s.io, kind: NetworkPolicy}
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute}

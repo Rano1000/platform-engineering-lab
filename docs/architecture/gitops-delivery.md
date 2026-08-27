@@ -1,0 +1,44 @@
+# GitOps delivery architecture
+
+## Purpose
+
+Phase 4 separates artifact production, environment intent, and reconciliation. Image changes publish one verified archive. Chart-only changes preserve the approved image and promote only a chart revision. Desired-state changes never trigger another promotion.
+
+```mermaid
+flowchart LR
+    Source[Image input change] --> Build[Build once]
+    Build --> Evidence[SBOM, scan, attestations]
+    Evidence --> Publish[Public GHCR image]
+    Publish --> Verify[Digest rescan and verification]
+    Verify --> PR[Promotion pull request]
+    PR --> State[Environment desired state on main]
+    State --> Root[Root Application detects change]
+    Root -->|manual stage 1| Child[Child Application becomes OutOfSync]
+    Child -->|manual stage 2| Workload[Golden Path API]
+```
+
+Chart changes do not publish an image; they open a reviewed configuration-promotion PR that changes only `chartRevision`. Documentation and `environments/local` changes neither publish nor promote. Mixed image-and-chart changes follow the image path and update both identities. An image-only promotion preserves the previously approved chart revision; the first image promotion uses its source revision because no earlier chart identity exists.
+
+## Reconciliation boundary
+
+The manually bootstrapped `platform-environment` root Application tracks `main` and the exact `environments/local/gitops/applications` path. Tracking `main` provides change detection only. Operator diff and sync resolve `origin/main` once to a complete `environmentRevision`, render and checksum the child specification from that commit, and pass the immutable revision explicitly to Argo. Its `platform-bootstrap` project permits only child Application resources in `gitops`. It cannot manage Secrets, namespaces, CRDs, cluster RBAC, Deployments, Services, or application workloads.
+
+The child `golden-path-api` Application uses the separate `platform-apps` project. That project constrains the repository, cluster, namespace, and workload resource kinds. AppProject cannot constrain a repository subdirectory, so repository validation and guarded automation enforce both environment and chart paths.
+
+Synchronization has two manual stages. First, the root diff updates only the child Application specification. Second, a separate child diff updates workload resources. Automatic synchronization, self-healing, pruning, cascading-deletion finalizers, and namespace creation are absent at both levels.
+
+Three revisions have separate meanings:
+
+- `environmentRevision`: commit containing the reviewed environment Application definition.
+- `chartRevision`: commit containing the reviewed Helm chart.
+- `imageSourceRevision`: commit used to build the reviewed image.
+
+The OCI revision must equal the image source revision, while the child chart source uses the chart revision. A chart-only promotion can therefore change configuration without relabelling or rebuilding the image.
+
+The complete approved child `spec` is serialized as canonical JSON and hashed with SHA-256. Root diff displays this checksum; root sync includes it in confirmation and requires the live child specification to reproduce it exactly. If `origin/main` advances after an older immutable revision is synchronized, the root correctly returns to OutOfSync and waits for another review.
+
+The Argo API server is ClusterIP-only, has no Gateway route, and has its built-in administrator disabled. Core-mode CLI operations use the operator's existing Kubernetes authentication.
+
+## Ownership transition
+
+The original Helm release record remains as historical evidence. The Helm guard activates when the live Deployment carries the child Application's annotation-based Argo tracking identity—not merely when the child object exists. Neither Argo Application has a cascading-deletion finalizer, so removing the root leaves the child, and removing the child leaves workload resources. Reversal validates those orphaned resources and explicitly restores guarded Helm ownership without editing the Helm release Secret.

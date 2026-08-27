@@ -16,6 +16,22 @@ Confirm the Traefik Service owns NodePorts 30080 and 30443 and uses `externalTra
 
 This is expected in Phase 2. The chart validates its HPA template statically, but autoscaling defaults off because Metrics Server is not installed.
 
+## Image publication does not run
+
+The workflow publishes only when reviewed image inputs change on `main` and the `GHCR_PUBLICATION_APPROVED` repository variable is `true`. A chart-, documentation-, or environment-only change deliberately reports that publication is not required. First publication and changing the package to public visibility require separate approval.
+
+## A promotion pull request is not created
+
+Confirm the GHCR package is public and linked to this repository, all three attestations verify, the digest rescan passed, and no different promotion PR remains open. The repository must also allow GitHub Actions to create pull requests. This setting is not changed by repository automation, and workflows on a PR created with `GITHUB_TOKEN` require a repository writer to approve or start them.
+
+## Helm application commands refuse to run
+
+This is expected after the `gitops/golden-path-api` Application exists. Use `make app-ownership-status` to inspect ownership. Do not use Helm as a second active manager; follow the documented GitOps reversal procedure before returning ownership to Helm.
+
+## Root synchronization reports that origin/main changed
+
+This is a safety stop. Root diff and sync operate on one complete `environmentRevision`, not mutable `main`. Update local `main`, rerun the root diff, review the new environment revision and child-specification checksum, and confirm again. Never substitute an abbreviated SHA or bypass the second remote check.
+
 ## Doctor reports Docker connectivity failure
 
 Confirm the Docker service or Docker Desktop is running, then run `docker info`. On Linux, verify that your user is authorized to access the configured Docker socket. Do not change socket permissions broadly; use the operating system's documented Docker group or rootless setup.

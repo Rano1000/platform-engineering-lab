@@ -9,6 +9,8 @@ APP_CHART=$REPOSITORY_ROOT/charts/golden-path-api
 APP_CONTEXT=$REPOSITORY_ROOT/applications/golden-path-api
 APP_DEPLOYMENT=$APP_RELEASE-$APP_NAME
 APP_SERVICE=$APP_DEPLOYMENT
+ARGO_APPLICATION_NAME=golden-path-api
+ARGO_APPLICATION_NAMESPACE=gitops
 
 GATEWAY_API_VERSION=v1.6.1
 GATEWAY_API_URL=https://github.com/kubernetes-sigs/gateway-api/releases/download/$GATEWAY_API_VERSION/standard-install.yaml
@@ -58,6 +60,26 @@ image_ref() {
 require_app_release() {
   helm --kube-context "$EXPECTED_CONTEXT" status "$APP_RELEASE" --namespace "$APP_NAMESPACE" >/dev/null 2>&1 ||
     die "Helm release '$APP_RELEASE' is not installed in '$APP_NAMESPACE'."
+}
+
+argo_application_exists() {
+  kubectl_lab get application.argoproj.io "$ARGO_APPLICATION_NAME" --namespace "$ARGO_APPLICATION_NAMESPACE" >/dev/null 2>&1
+}
+
+argo_application_owns_workload() {
+  argo_application_exists || return 1
+  tracking=$(kubectl_lab get deployment "$APP_DEPLOYMENT" --namespace "$APP_NAMESPACE" \
+    -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/tracking-id}' 2>/dev/null || true)
+  case $tracking in
+    "$ARGO_APPLICATION_NAME":apps/Deployment:"$APP_NAMESPACE"/"$APP_DEPLOYMENT") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+refuse_helm_mutation_when_gitops_owned() {
+  if argo_application_owns_workload; then
+    die "Argo Application '$ARGO_APPLICATION_NAME' owns this workload. Helm mutation is disabled; use the GitOps workflow."
+  fi
 }
 
 confirm_exact() {

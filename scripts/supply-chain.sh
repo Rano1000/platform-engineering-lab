@@ -150,13 +150,16 @@ PY
 scan_image() {
   validate_policy
   prepare_artifacts
-  reference=$(image_reference)
+  reference=${SCAN_IMAGE_REFERENCE:-$(image_reference)}
+  if [ -n "${SCAN_IMAGE_REFERENCE:-}" ]; then
+    printf '%s\n' "$reference" | grep -Eq '^ghcr\.io/rano1000/golden-path-api@sha256:[0-9a-f]{64}$' ||
+      die 'External scanning requires the approved GHCR image at a complete digest.'
+  fi
   ignore=$ARTIFACT_DIR/trivy-ignore.txt
   ignore_file >"$ignore"
   run_trivy image --scanners vuln --format json --output /artifacts/trivy-vulnerabilities.json --no-progress "$reference"
+  (cd "$ARTIFACT_DIR" && sha256sum "$(basename "$SCAN_REPORT")" >"$(basename "$SCAN_REPORT").sha256")
   record_trivy_metadata
-  run_trivy image --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 \
-    --ignorefile /artifacts/trivy-ignore.txt --no-progress --scanners vuln "$reference"
   python3 - "$SCAN_REPORT" "$TRIVY_METADATA" "$SCAN_SUMMARY" "$reference" "$(full_revision)" <<'PY'
 import collections, json, pathlib, sys
 
@@ -182,6 +185,8 @@ summary = {
 }
 pathlib.Path(sys.argv[3]).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 PY
+  run_trivy image --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 \
+    --ignorefile /artifacts/trivy-ignore.txt --no-progress --scanners vuln "$reference"
   printf '%s\n' 'PASS  no unexcepted fixable HIGH or CRITICAL vulnerabilities found.'
 }
 
@@ -232,7 +237,7 @@ update_locks() {
 }
 
 usage() {
-  printf 'usage: %s {build-artifact|load-artifact|inspect|policy|policy-test|secret-scan|sbom|scan|locks|locks-update}\n' "$0" >&2
+  printf 'usage: %s {build-artifact|load-artifact|inspect|policy|policy-test|secret-scan|sbom|scan|scan-reference IMAGE@DIGEST|locks|locks-update}\n' "$0" >&2
   exit 2
 }
 
@@ -245,6 +250,12 @@ case ${1:-} in
   secret-scan) secret_scan ;;
   sbom) generate_sbom ;;
   scan) scan_image ;;
+  scan-reference)
+    [ "$#" -eq 2 ] || usage
+    SCAN_IMAGE_REFERENCE=$2
+    export SCAN_IMAGE_REFERENCE
+    scan_image
+    ;;
   locks) verify_locks ;;
   locks-update) update_locks ;;
   *) usage ;;

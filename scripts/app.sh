@@ -37,6 +37,7 @@ load_app() {
 deploy_app() {
   require_command helm
   require_lab_runtime
+  refuse_helm_mutation_when_gitops_owned
   require_clean_build_sources
   reference=$(image_ref)
   docker image inspect "$reference" >/dev/null 2>&1 || die "Local image '$reference' is missing."
@@ -61,9 +62,25 @@ status_app() {
 uninstall_app() {
   require_command helm
   require_lab_runtime
+  refuse_helm_mutation_when_gitops_owned
   require_app_release
   confirm_exact "$APP_RELEASE" "This removes only Helm release '$APP_RELEASE' from namespace '$APP_NAMESPACE'."
   helm uninstall "$APP_RELEASE" --kube-context "$EXPECTED_CONTEXT" --namespace "$APP_NAMESPACE" --wait
+}
+
+ownership_status() {
+  require_lab_runtime
+  if argo_application_owns_workload; then
+    printf '%s\n' "ACTIVE OWNER  Argo Application '$ARGO_APPLICATION_NAMESPACE/$ARGO_APPLICATION_NAME'."
+    printf '%s\n' "HISTORICAL    Helm release '$APP_NAMESPACE/$APP_RELEASE'; mutation targets are guarded."
+  elif argo_application_exists; then
+    printf '%s\n' "PENDING OWNER Argo Application '$ARGO_APPLICATION_NAMESPACE/$ARGO_APPLICATION_NAME' exists but has not adopted the Deployment."
+    printf '%s\n' "ACTIVE OWNER  Helm release '$APP_NAMESPACE/$APP_RELEASE'. Avoid Helm mutation during the reviewed adoption window."
+  elif helm --kube-context "$EXPECTED_CONTEXT" status "$APP_RELEASE" --namespace "$APP_NAMESPACE" >/dev/null 2>&1; then
+    printf '%s\n' "ACTIVE OWNER  Helm release '$APP_NAMESPACE/$APP_RELEASE'."
+  else
+    printf '%s\n' 'ACTIVE OWNER  none detected.'
+  fi
 }
 
 network_test() {
@@ -120,7 +137,7 @@ recovery_test() {
 }
 
 usage() {
-  printf 'usage: %s {test|build|load|deploy|status|validate|uninstall|network-test|recovery-test}\n' "$0" >&2
+  printf 'usage: %s {test|build|load|deploy|status|validate|uninstall|ownership-status|network-test|recovery-test}\n' "$0" >&2
   exit 2
 }
 
@@ -132,6 +149,7 @@ case ${1:-} in
   status) status_app ;;
   validate) "$SCRIPT_DIR/validate-app.sh" ;;
   uninstall) uninstall_app ;;
+  ownership-status) ownership_status ;;
   network-test) network_test ;;
   recovery-test) recovery_test ;;
   *) usage ;;

@@ -4,12 +4,18 @@
 
 `Repository validation` retains the general repository checks. `Application supply chain` always runs on pull requests and pushes to `main`, and supports manual dispatch. Its jobs are:
 
-1. `repository`: validate repository, dependency-lock, and exception-policy contracts.
-2. `image`: run unit tests, build one immutable runtime image, and upload its checksummed archive.
-3. `supply-chain`: reload that archive, scan secrets and vulnerabilities, and generate a CycloneDX SBOM.
-4. `attest`: on `main` pushes only, attest the image archive and SBOM without publishing an image.
+1. `changes`: classify image, chart-only, desired-state-only, or unrelated changes.
+2. `repository`: validate repository, dependency-lock, exception-policy, and GitOps contracts.
+3. `image`: when required, run unit tests, build one immutable runtime image, and upload its checksummed archive.
+4. `supply-chain`: reload that archive, scan secrets and vulnerabilities, and generate a CycloneDX SBOM.
+5. `attest-artifacts`: on eligible `main` pushes, attest the exact image archive and SBOM.
+6. `publish`: after separate approval, verify those attestations and publish the same archive to GHCR.
+7. `attest-image` and `promote`: attest and rescan the registry digest, then open a review-only desired-state pull request.
+8. `chart-promotion`: for chart-only main changes, validate with the approved digest and open a chart-revision-only PR without building.
 
-Artifacts are retained for 14 days. The workflow never uses `packages: write`. Job summaries include unit-test status, immutable image identity, archive and SBOM checksums, finding totals by severity and fix availability, and scanner database metadata.
+Artifacts are retained for 14 days. Workflow permissions default to `contents: read`; only publication receives `packages: write`, only attestation receives OIDC and attestation writes, and only promotion receives repository and pull-request writes. Job summaries include unit-test status, immutable image identity, archive and SBOM checksums, finding totals by severity and fix availability, and scanner database metadata.
+
+Application source, its Dockerfile, runtime locks, and image-content build scripts are image inputs. Chart changes form their own category. `environments/local` changes are desired-state-only, and documentation is unrelated. A mixed image-and-chart change updates both revisions; an image-only change preserves the approved chart revision. Promotion PRs therefore cannot publish an image or create another promotion PR, while every category still completes the required workflow.
 
 ## Vulnerability policy
 
@@ -26,6 +32,8 @@ Expired or malformed entries fail before scanning. The full Trivy JSON report in
 ## Artifact identity
 
 The image tag contains the first 12 characters of the workflow commit. The OCI revision label contains the complete 40-character commit. `golden-path-api.tar.sha256` authenticates the archive passed between jobs. The SBOM companion summary records the image reference, revision, Trivy version, and SBOM checksum.
+
+Publication never rebuilds. A pinned, checksum-verified GitHub CLI verifies the archive and SBOM attestations before the archive is pushed. Promotion verifies the registry-image attestation, confirms public package visibility and repository linkage, rescans the complete registry digest, and records separate `imageSourceRevision` and `chartRevision` values. The OCI revision must match the image source revision; the child Application renders the chart from the chart revision.
 
 ## Updating dependencies
 

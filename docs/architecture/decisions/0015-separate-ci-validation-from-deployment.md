@@ -9,7 +9,9 @@ Phase 3 must validate contributor changes safely, including fork pull requests, 
 
 ## Decision
 
-CI receives no kubeconfig, deployment credential, or image publication permission. It does not contact Kubernetes, use `pull_request_target`, publish to GHCR, enable HPA, or configure TLS. Default workflow permission is `contents: read`; only the main-push attestation job receives identity-token and attestation write permissions.
+Phase 3 CI receives no kubeconfig, deployment credential, or image publication permission. It does not contact Kubernetes, use `pull_request_target`, publish to GHCR, enable HPA, or configure TLS. Default workflow permission is `contents: read`; only the main-push attestation job receives identity-token and attestation write permissions.
+
+Phase 4 extends this decision through [ADR-0016](0016-publish-images-to-ghcr.md): a separately gated job may publish a verified artifact, but it still cannot deploy or edit desired state. Publication and deployment authority remain separated.
 
 ## Consequences
 

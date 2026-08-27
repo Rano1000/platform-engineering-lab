@@ -17,6 +17,40 @@ env:
   ARTIFACT_DIR: .artifacts/supply-chain
 
 jobs:
+  changes:
+    name: Publication decision
+    runs-on: ubuntu-24.04
+    outputs:
+      category: ${{ steps.impact.outputs.category }}
+      image_required: ${{ steps.impact.outputs.image_required }}
+      chart_required: ${{ steps.impact.outputs.chart_required }}
+      chart_changed: ${{ steps.impact.outputs.chart_changed }}
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect image-impacting changes
+        id: impact
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_BASE_SHA: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT_NAME" = pull_request ]; then
+            base=$PR_BASE_SHA
+          elif [ "$EVENT_NAME" = push ] && ! printf '%s' "$EVENT_BASE_SHA" | grep -Eq '^0{40}$'; then
+            base=$EVENT_BASE_SHA
+          else
+            base=$(git rev-parse HEAD^)
+          fi
+          ./scripts/detect-image-impact.py --base "$base" --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"
+      - name: Summarize publication decision
+        run: |
+          category='${{ steps.impact.outputs.category }}'
+          printf '### Change classification\n\nCategory: `%s`\n' "$category" >> "$GITHUB_STEP_SUMMARY"
+
   repository:
     name: Repository contracts
     runs-on: ubuntu-24.04
@@ -26,7 +60,6 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-
       - name: Install pinned validation tools
         run: |
           python3 -m pip install --disable-pip-version-check yamllint==1.37.1
@@ -34,23 +67,13 @@ jobs:
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-
       - name: Validate repository and policy
         run: make ci-check
 
-      - name: Summarize repository validation
-        if: always()
-        run: |
-          {
-            echo '### Repository contracts'
-            echo
-            echo "Revision: \`${GITHUB_SHA}\`"
-            echo "Result: **${{ job.status }}**"
-          } >> "$GITHUB_STEP_SUMMARY"
-
   image:
     name: Test and build once
-    needs: repository
+    if: needs.changes.outputs.image_required == 'true'
+    needs: [changes, repository]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     outputs:
@@ -61,13 +84,10 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-
       - name: Run unit tests
         run: make app-test
-
       - name: Build and export immutable image once
         run: make app-image-artifact
-
       - name: Record image identity
         id: identity
         run: |
@@ -75,15 +95,8 @@ jobs:
           archive_sha256=$(cut -d ' ' -f 1 "$ARTIFACT_DIR/golden-path-api.tar.sha256")
           echo "reference=$reference" >> "$GITHUB_OUTPUT"
           echo "archive_sha256=$archive_sha256" >> "$GITHUB_OUTPUT"
-          {
-            echo '### Immutable image'
-            echo
-            echo "Image: \`$reference\`"
-            echo "OCI revision: \`$GITHUB_SHA\`"
-            echo "Archive SHA-256: \`$archive_sha256\`"
-            echo 'Unit tests: **passed**'
-          } >> "$GITHUB_STEP_SUMMARY"
-
+          printf '### Immutable image\n\nImage: `%s`\n\nOCI revision: `%s`\n\nArchive SHA-256: `%s`\n\nUnit tests: **passed**\n' \
+            "$reference" "$GITHUB_SHA" "$archive_sha256" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload immutable image archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
@@ -93,6 +106,27 @@ jobs:
             .artifacts/supply-chain/golden-path-api.tar.sha256
           if-no-files-found: error
           retention-days: 14
+
+  chart-promotion:
+    name: Open reviewed chart promotion
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.chart_required == 'true'
+    needs: [changes, repository]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out repository for chart promotion
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - name: Install pinned GitHub CLI
+        run: echo "$(./scripts/install-pinned-gh.sh .tools)" >> "$GITHUB_PATH"
+      - name: Install pinned manifest parser
+        run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
+      - name: Validate chart and open reviewed promotion pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./scripts/create-chart-promotion-pr.sh
 
   supply-chain:
     name: SBOM and vulnerability policy
@@ -104,56 +138,35 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-
       - name: Download immutable image archive
         uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
         with:
           name: golden-path-image-${{ github.sha }}
           path: .artifacts/supply-chain
-
       - name: Verify and load image archive
         run: |
           ./scripts/supply-chain.sh load-artifact
           make app-image-inspect
-
       - name: Scan repository for secrets
         run: make supply-chain-secret-scan
-
       - name: Generate CycloneDX SBOM
         run: make app-sbom
-
       - name: Enforce vulnerability policy
         run: make app-scan
-
       - name: Add evidence to job summary
         run: |
           python3 - "$ARTIFACT_DIR/sbom-metadata.json" "$ARTIFACT_DIR/scan-summary.json" "$GITHUB_STEP_SUMMARY" <<'PY'
           import json, pathlib, sys
           sbom = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
           scan = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
-          database = scan.get("database", {})
           with pathlib.Path(sys.argv[3]).open("a", encoding="utf-8") as summary:
               summary.write("### Supply-chain evidence\n\n")
               summary.write(f"SBOM SHA-256: `{sbom['artifactSha256']}`\n\n")
               summary.write(f"Findings by severity: `{scan['findingsBySeverity']}`\n\n")
               summary.write(f"Findings by fix availability: `{scan['findingsByFixAvailability']}`\n\n")
               summary.write(f"Trivy: `{scan['scanner']['version']}`\n\n")
-              summary.write(f"Vulnerability database updated: `{database.get('UpdatedAt', 'unavailable')}`\n")
+              summary.write(f"Database updated: `{scan['database'].get('UpdatedAt', 'unavailable')}`\n")
           PY
-
-      - name: Summarize supply-chain results
-        if: always()
-        run: |
-          {
-            echo '### Supply-chain validation'
-            echo
-            echo "Image: \`${{ needs.image.outputs.image-reference }}\`"
-            echo "Archive SHA-256: \`${{ needs.image.outputs.archive-sha256 }}\`"
-            echo "Result: **${{ job.status }}**"
-            echo 'The JSON report includes unfixed findings.'
-            echo 'Only unexcepted, fixable HIGH or CRITICAL findings fail this gate.'
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Upload SBOM and reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -166,15 +179,15 @@ jobs:
             .artifacts/supply-chain/scan-summary.json
             .artifacts/supply-chain/trivy-metadata.json
             .artifacts/supply-chain/trivy-vulnerabilities.json
-          if-no-files-found: warn
+            .artifacts/supply-chain/trivy-vulnerabilities.json.sha256
+          if-no-files-found: error
           retention-days: 14
 
-  attest:
-    name: Attest workflow artifacts
+  attest-artifacts:
+    name: Attest image archive and SBOM
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [image, supply-chain]
+    needs: supply-chain
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
     permissions:
       contents: read
       id-token: write
@@ -184,30 +197,186 @@ jobs:
         uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
         with:
           name: golden-path-image-${{ github.sha }}
-          path: artifacts/image
-
-      - name: Download SBOM and reports
+          path: artifacts
+      - name: Download SBOM
         uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
         with:
           name: golden-path-supply-chain-${{ github.sha }}
-          path: artifacts/supply-chain
-
-      - name: Attest image archive and SBOM
-        id: attestation
-        continue-on-error: true
+          path: artifacts
+      - name: Attest exact artifacts
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
         with:
           subject-path: |
-            artifacts/image/golden-path-api.tar
-            artifacts/supply-chain/golden-path-api.cdx.json
+            artifacts/golden-path-api.tar
+            artifacts/golden-path-api.cdx.json
 
-      - name: Summarize attestation
-        if: always()
+  publication-gate:
+    name: Publication approval
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: attest-artifacts
+    runs-on: ubuntu-24.04
+    outputs:
+      approved: ${{ steps.gate.outputs.approved }}
+    steps:
+      - name: Check explicit publication approval
+        id: gate
+        env:
+          APPROVED: ${{ vars.GHCR_PUBLICATION_APPROVED }}
         run: |
-          {
-            echo '### Artifact attestation'
-            echo
-            echo "Result: **${{ steps.attestation.outcome }}**"
-            echo 'Attestation availability is optional.'
-            echo 'Validation artifacts remain checksummed and retained for 14 days.'
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$APPROVED" = true ]; then
+            echo 'approved=true' >> "$GITHUB_OUTPUT"
+            message='GHCR publication is explicitly approved.'
+          else
+            echo 'approved=false' >> "$GITHUB_OUTPUT"
+            message='Publication not approved'
+          fi
+          printf '### Publication approval\n\n%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Publish verified image
+    if: needs.publication-gate.outputs.approved == 'true'
+    needs: [publication-gate, image, supply-chain]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+      digest: ${{ steps.publish.outputs.digest }}
+      revision: ${{ steps.publish.outputs.revision }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Download verified artifacts
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
+        with:
+          pattern: golden-path-*-${{ github.sha }}
+          merge-multiple: true
+          path: .artifacts/publication
+      - name: Install pinned GitHub CLI
+        run: echo "$(./scripts/install-pinned-gh.sh .tools)" >> "$GITHUB_PATH"
+      - name: Cryptographically verify archive and SBOM
+        run: |
+          ./scripts/verify-promotion-artifacts.sh artifacts .artifacts/publication gh
+          cut -d ' ' -f 1 .artifacts/publication/golden-path-api.tar.sha256 > .artifacts/publication/.attestations-verified
+      - name: Publish exact verified archive
+        id: publish
+        env:
+          GHCR_PUBLICATION_APPROVED: ${{ vars.GHCR_PUBLICATION_APPROVED }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./scripts/publish-image.sh publish .artifacts/publication
+
+  attest-image:
+    name: Attest registry image
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Attest exact registry subject
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
+        with:
+          subject-name: ${{ needs.publish.outputs.image }}
+          subject-digest: ${{ needs.publish.outputs.digest }}
+
+  promote:
+    name: Verify and open promotion PR
+    needs: [changes, publish, attest-image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out repository for promotion branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - name: Download supply-chain artifacts
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
+        with:
+          pattern: golden-path-*-${{ github.sha }}
+          merge-multiple: true
+          path: .artifacts/promotion
+      - name: Install pinned GitHub CLI
+        run: echo "$(./scripts/install-pinned-gh.sh .tools)" >> "$GITHUB_PATH"
+      - name: Install pinned manifest parser
+        run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
+      - name: Verify all attestations
+        run: |
+          ./scripts/verify-promotion-artifacts.sh artifacts .artifacts/promotion gh
+          ./scripts/verify-promotion-artifacts.sh image \
+            "${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}" gh
+      - name: Rescan exact registry digest
+        run: ./scripts/supply-chain.sh scan-reference "${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}"
+      - name: Confirm public linked package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api /users/Rano1000/packages/container/golden-path-api > .artifacts/promotion/package.json
+      - name: Create promotion evidence
+        env:
+          CHART_CHANGED: ${{ needs.changes.outputs.chart_changed }}
+        run: |
+          if [ "$CHART_CHANGED" = true ]; then
+            chart_revision=$GITHUB_SHA
+          else
+            chart_revision=$(python3 - <<'PY'
+          import json, pathlib, os
+          path = pathlib.Path('environments/local/gitops/evidence/golden-path-api.json')
+          evidence = json.loads(path.read_text(encoding='utf-8'))
+          print(evidence.get('chartRevision', os.environ['GITHUB_SHA']))
+          PY
+          )
+          fi
+          ./scripts/create-promotion-evidence.py \
+            --chart-revision "$chart_revision" \
+            --image-source-revision "$GITHUB_SHA" \
+            --image-digest "${{ needs.publish.outputs.digest }}" \
+            --archive-checksum .artifacts/promotion/golden-path-api.tar.sha256 \
+            --sbom-checksum .artifacts/promotion/golden-path-api.cdx.json.sha256 \
+            --vulnerability-report-checksum .artifacts/supply-chain/trivy-vulnerabilities.json.sha256 \
+            --scan-summary .artifacts/supply-chain/scan-summary.json \
+            --scan-report .artifacts/supply-chain/trivy-vulnerabilities.json \
+            --package .artifacts/promotion/package.json \
+            --output .artifacts/promotion/promotion-evidence.json
+      - name: Open reviewed promotion pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./scripts/create-promotion-pr.sh .artifacts/promotion/promotion-evidence.json
+
+  conclusion:
+    name: Application CI conclusion
+    if: always()
+    needs: [changes, repository, image, chart-promotion, supply-chain, attest-artifacts, publication-gate, publish, attest-image, promote]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Enforce required conclusions
+        env:
+          CATEGORY: ${{ needs.changes.outputs.category }}
+          IMAGE_REQUIRED: ${{ needs.changes.outputs.image_required }}
+          CHART_REQUIRED: ${{ needs.changes.outputs.chart_required }}
+          REPOSITORY_RESULT: ${{ needs.repository.result }}
+          IMAGE_RESULT: ${{ needs.image.result }}
+          SUPPLY_RESULT: ${{ needs.supply-chain.result }}
+          EVENT_NAME: ${{ github.event_name }}
+          PUBLICATION_APPROVED: ${{ needs.publication-gate.outputs.approved }}
+          PROMOTION_RESULT: ${{ needs.promote.result }}
+          CHART_PROMOTION_RESULT: ${{ needs.chart-promotion.result }}
+        run: |
+          [ "$REPOSITORY_RESULT" = success ] || exit 1
+          if [ "$IMAGE_REQUIRED" != true ]; then
+            echo 'Image publication not required.'
+          else
+            [ "$IMAGE_RESULT" = success ] && [ "$SUPPLY_RESULT" = success ] || exit 1
+            if [ "$EVENT_NAME" = push ] && [ "$PUBLICATION_APPROVED" = true ]; then
+              [ "$PROMOTION_RESULT" = success ] || exit 1
+            fi
+          fi
+          if [ "$EVENT_NAME" = push ] && [ "$CHART_REQUIRED" = true ]; then
+            [ "$CHART_PROMOTION_RESULT" = success ] || exit 1
+          fi
+          if [ "$CATEGORY" = desired-state-only ] || [ "$CATEGORY" = unrelated ]; then
+            echo 'Promotion not required.'
+          fi

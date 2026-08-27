@@ -19,6 +19,6 @@ Maintainers should acknowledge a report within five business days, establish a p
 - CI validation must not deploy resources or require production credentials.
 - Third-party GitHub Actions are pinned to immutable commit SHAs.
 
-Phase 3 scans repository content for secrets, records all image vulnerability findings, and blocks unexcepted fixable HIGH or CRITICAL vulnerabilities. Temporary exceptions must identify an owner and expire within 90 days. CI generates a checksummed CycloneDX SBOM but does not publish or deploy the image.
+Phase 3 scans repository content for secrets, records all image vulnerability findings, and blocks unexcepted fixable HIGH or CRITICAL vulnerabilities. Temporary exceptions must identify an owner and expire within 90 days. Phase 4 publication remains separately approved and verifies checksums, attestations, OCI identity, public-package linkage, and a fresh digest scan before proposing desired state. CI never receives Kubernetes credentials or deploys the image.
 
 This policy covers the repository content. Future deployed components will document their own threat model and support boundaries before release.

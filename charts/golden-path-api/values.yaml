@@ -3,6 +3,7 @@ replicaCount: 2
 image:
   repository: golden-path-api
   tag: ""
+  digest: ""
   revision: ""
   pullPolicy: Never
 
