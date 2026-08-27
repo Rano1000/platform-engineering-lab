@@ -47,9 +47,10 @@ jobs:
           fi
           ./scripts/detect-image-impact.py --base "$base" --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"
       - name: Summarize publication decision
+        env:
+          CATEGORY: ${{ steps.impact.outputs.category }}
         run: |
-          category='${{ steps.impact.outputs.category }}'
-          printf '### Change classification\n\nCategory: `%s`\n' "$category" >> "$GITHUB_STEP_SUMMARY"
+          printf '### Change classification\n\nCategory: `%s`\n' "$CATEGORY" >> "$GITHUB_STEP_SUMMARY"
 
   repository:
     name: Repository contracts
@@ -122,7 +123,7 @@ jobs:
       - name: Check out repository for chart promotion
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - name: Install pinned GitHub CLI
-        run: echo "$(./scripts/install-pinned-gh.sh .tools)" >> "$GITHUB_PATH"
+        run: ./scripts/install-pinned-gh.sh .tools >> "$GITHUB_PATH"
       - name: Install pinned manifest parser
         run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
       - name: Validate chart and open reviewed promotion pull request
@@ -259,7 +260,7 @@ jobs:
           merge-multiple: true
           path: .artifacts/publication
       - name: Install pinned GitHub CLI
-        run: echo "$(./scripts/install-pinned-gh.sh .tools)" >> "$GITHUB_PATH"
+        run: ./scripts/install-pinned-gh.sh .tools >> "$GITHUB_PATH"
       - name: Cryptographically verify archive and SBOM
         run: |
           ./scripts/verify-promotion-artifacts.sh artifacts .artifacts/publication gh
@@ -305,7 +306,7 @@ jobs:
           merge-multiple: true
           path: .artifacts/promotion
       - name: Install pinned GitHub CLI
-        run: echo "$(./scripts/install-pinned-gh.sh .tools)" >> "$GITHUB_PATH"
+        run: ./scripts/install-pinned-gh.sh .tools >> "$GITHUB_PATH"
       - name: Install pinned manifest parser
         run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
       - name: Verify all attestations

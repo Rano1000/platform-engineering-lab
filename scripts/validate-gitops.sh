@@ -36,13 +36,13 @@ for application in "$ARGOCD_ROOT_APPLICATION" "$ARGOCD_APPLICATION"; do
   if kubectl_lab get application "$application" --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then
     automated=$(kubectl_lab get application "$application" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.spec.syncPolicy.automated}' 2>/dev/null || true)
     finalizers=$(kubectl_lab get application "$application" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.metadata.finalizers}' 2>/dev/null || true)
-    [ -z "$automated" ] && pass "$application automatic synchronization is absent." || fail "$application automatic synchronization is enabled."
-    [ -z "$finalizers" ] && pass "$application has no cascading-deletion finalizer." || fail "$application has an unexpected finalizer."
+    if [ -z "$automated" ]; then pass "$application automatic synchronization is absent."; else fail "$application automatic synchronization is enabled."; fi
+    if [ -z "$finalizers" ]; then pass "$application has no cascading-deletion finalizer."; else fail "$application has an unexpected finalizer."; fi
   fi
 done
 if require_argocd_application 2>/dev/null; then
   accepted=$(kubectl_lab get application "$ARGOCD_APPLICATION" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.status.health.status}' 2>/dev/null || true)
-  [ -n "$accepted" ] && pass "Application health is reported as $accepted." || fail 'Application health is not reported.'
+  if [ -n "$accepted" ]; then pass "Application health is reported as $accepted."; else fail 'Application health is not reported.'; fi
 fi
 printf '\nSummary: %s PASS, %s FAIL\n' "$PASS_COUNT" "$FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ]

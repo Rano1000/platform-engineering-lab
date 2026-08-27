@@ -10,7 +10,9 @@ EXPECTED_REPOSITORY=Rano1000/platform-engineering-lab
 die() { printf 'ERROR %s\n' "$*" >&2; exit 1; }
 
 [ "${GITHUB_REPOSITORY:-}" = "$EXPECTED_REPOSITORY" ] || die 'unexpected GitHub repository'
-[ "${GITHUB_EVENT_NAME:-}" = push ] && [ "${GITHUB_REF:-}" = refs/heads/main ] || die 'chart promotion is restricted to main pushes'
+if [ "${GITHUB_EVENT_NAME:-}" != push ] || [ "${GITHUB_REF:-}" != refs/heads/main ]; then
+  die 'chart promotion is restricted to main pushes'
+fi
 [ -n "${GITHUB_TOKEN:-}" ] || die 'GITHUB_TOKEN is required'
 command -v gh >/dev/null 2>&1 || die 'the pinned GitHub CLI must be on PATH'
 command -v helm >/dev/null 2>&1 || die 'Helm is required'

@@ -93,8 +93,10 @@ root_sync() {
   root_repo=$(kubectl_lab get application "$ARGOCD_ROOT_APPLICATION" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.spec.source.repoURL}')
   root_revision=$(kubectl_lab get application "$ARGOCD_ROOT_APPLICATION" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.spec.source.targetRevision}')
   root_path=$(kubectl_lab get application "$ARGOCD_ROOT_APPLICATION" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.spec.source.path}')
-  [ "$root_repo" = https://github.com/Rano1000/platform-engineering-lab.git ] && [ "$root_revision" = main ] &&
-    [ "$root_path" = environments/local/gitops/applications ] || die 'Live root Application source contract is unexpected.'
+  if [ "$root_repo" != https://github.com/Rano1000/platform-engineering-lab.git ] ||
+    [ "$root_revision" != main ] || [ "$root_path" != environments/local/gitops/applications ]; then
+    die 'Live root Application source contract is unexpected.'
+  fi
   printf '%s\n' 'Stage 1 changes only the child Application specification in gitops. It does not synchronize or prune workload resources.'
   printf 'Environment revision: %s\nChild specification SHA-256: %s\n' "$environment_revision" "$child_spec_checksum"
   argocd app diff "$ARGOCD_ROOT_APPLICATION" --core --revision "$environment_revision" || diff_status=$?
@@ -138,7 +140,9 @@ app_sync() {
   live_chart=$(kubectl_lab get application "$ARGOCD_APPLICATION" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.spec.source.targetRevision}')
   live_digest=$(kubectl_lab get application "$ARGOCD_APPLICATION" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.spec.source.helm.valuesObject.image.digest}')
   [ "$live_repo" = https://github.com/Rano1000/platform-engineering-lab.git ] || die 'Live child Application uses an unexpected repository.'
-  [ "$live_chart" = "$chart_revision" ] && [ "$live_digest" = "$digest" ] || die 'Run the approved root sync before workload synchronization.'
+  if [ "$live_chart" != "$chart_revision" ] || [ "$live_digest" != "$digest" ]; then
+    die 'Run the approved root sync before workload synchronization.'
+  fi
   printf '%s\n' 'Stage 2 changes only resources owned by the child Application. Pruning remains disabled.'
   argocd app diff "$ARGOCD_APPLICATION" --core || diff_status=$?
   case ${diff_status:-0} in 0|1) ;; *) die 'Argo workload diff failed.' ;; esac
