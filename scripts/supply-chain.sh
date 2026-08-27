@@ -54,7 +54,9 @@ inspect_image() {
   health=$(docker image inspect "$reference" --format '{{json .Config.Healthcheck.Test}}')
   [ "$revision" = "$(full_revision)" ] || die 'OCI revision does not match the complete Git SHA.'
   [ "$user" = '10001:10001' ] || die "Runtime user is '$user', expected 10001:10001."
-  [ "$health" != 'null' ] && [ "$health" != '[]' ] || die 'Runtime image has no health check.'
+  if [ "$health" = 'null' ] || [ "$health" = '[]' ]; then
+    die 'Runtime image has no health check.'
+  fi
   if docker image inspect "$APP_IMAGE:latest" >/dev/null 2>&1; then
     die "Forbidden mutable tag '$APP_IMAGE:latest' exists locally."
   fi

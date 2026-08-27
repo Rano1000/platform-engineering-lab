@@ -150,7 +150,8 @@ jobs:
             echo "Image: \`${{ needs.image.outputs.image-reference }}\`"
             echo "Archive SHA-256: \`${{ needs.image.outputs.archive-sha256 }}\`"
             echo "Result: **${{ job.status }}**"
-            echo 'The JSON report includes unfixed findings; only unexcepted, fixable HIGH or CRITICAL findings fail this gate.'
+            echo 'The JSON report includes unfixed findings.'
+            echo 'Only unexcepted, fixable HIGH or CRITICAL findings fail this gate.'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload SBOM and reports
@@ -207,5 +208,6 @@ jobs:
             echo '### Artifact attestation'
             echo
             echo "Result: **${{ steps.attestation.outcome }}**"
-            echo 'Attestation availability is optional; validation artifacts remain checksummed and retained for 14 days.'
+            echo 'Attestation availability is optional.'
+            echo 'Validation artifacts remain checksummed and retained for 14 days.'
           } >> "$GITHUB_STEP_SUMMARY"
