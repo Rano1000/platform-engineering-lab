@@ -2,6 +2,12 @@ name: Application supply chain
 
 on:
   workflow_dispatch:
+    inputs:
+      force_image_build:
+        description: Run the complete image validation path without authorizing publication
+        required: false
+        default: false
+        type: boolean
   pull_request:
   push:
     branches: [main]
@@ -22,7 +28,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       category: ${{ steps.impact.outputs.category }}
-      image_required: ${{ steps.impact.outputs.image_required }}
+      image_required: ${{ steps.decision.outputs.image_required }}
       chart_required: ${{ steps.impact.outputs.chart_required }}
       chart_changed: ${{ steps.impact.outputs.chart_changed }}
     steps:
@@ -46,6 +52,18 @@ jobs:
             base=$(git rev-parse HEAD^)
           fi
           ./scripts/detect-image-impact.py --base "$base" --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"
+      - name: Resolve safe image-build decision
+        id: decision
+        env:
+          CLASSIFIED_IMAGE_REQUIRED: ${{ steps.impact.outputs.image_required }}
+          EVENT_NAME: ${{ github.event_name }}
+          FORCE_IMAGE_BUILD: ${{ inputs.force_image_build }}
+        run: |
+          image_required=$CLASSIFIED_IMAGE_REQUIRED
+          if [ "$EVENT_NAME" = workflow_dispatch ] && [ "$FORCE_IMAGE_BUILD" = true ]; then
+            image_required=true
+          fi
+          echo "image_required=$image_required" >> "$GITHUB_OUTPUT"
       - name: Summarize publication decision
         env:
           CATEGORY: ${{ steps.impact.outputs.category }}
@@ -189,7 +207,9 @@ jobs:
 
   attest-artifacts:
     name: Attest image archive and SBOM
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.force_image_build)
     needs: supply-chain
     runs-on: ubuntu-24.04
     permissions:
@@ -216,7 +236,9 @@ jobs:
 
   publication-gate:
     name: Publication approval
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.force_image_build)
     needs: attest-artifacts
     runs-on: ubuntu-24.04
     outputs:
@@ -226,8 +248,9 @@ jobs:
         id: gate
         env:
           APPROVED: ${{ vars.GHCR_PUBLICATION_APPROVED }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ "$APPROVED" = true ]; then
+          if [ "$EVENT_NAME" = push ] && [ "$APPROVED" = true ]; then
             echo 'approved=true' >> "$GITHUB_OUTPUT"
             message='GHCR publication is explicitly approved.'
           else
@@ -238,7 +261,9 @@ jobs:
 
   publish:
     name: Publish verified image
-    if: needs.publication-gate.outputs.approved == 'true'
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.publication-gate.outputs.approved == 'true'
     needs: [publication-gate, image, supply-chain]
     runs-on: ubuntu-24.04
     permissions:

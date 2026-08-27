@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Added
 
+- A manual, pre-publication image-validation path that cannot authorize GHCR publication or promotion.
 - Phase 4 repository contracts for verified public-image publication, reviewed immutable-digest promotion, and manual Argo CD reconciliation.
 - A restricted local AppProject, digest-only desired-state template, lightweight pinned Argo CD configuration, and guarded GitOps ownership commands.
 - A restricted root Application for merged desired-state detection and separate chart-only promotion without image rebuilds.

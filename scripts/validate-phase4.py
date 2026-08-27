@@ -138,7 +138,21 @@ def validate_workflow() -> None:
     assert "contents: write" in text and "pull-requests: write" in text
     assert "chart-promotion:" in text
     assert "chart_changed" in text
+    assert "force_image_build:" in text
+    assert "CLASSIFIED_IMAGE_REQUIRED" in text
+    assert "github.event_name == 'workflow_dispatch' && inputs.force_image_build" in text
+    assert "github.event_name == 'push' && github.ref == 'refs/heads/main'" in text
+    assert "if [ \"$EVENT_NAME\" = push ] && [ \"$APPROVED\" = true ]" in text
     assert workflow["permissions"] == {"contents": "read"}
+
+    jobs = workflow["jobs"]
+    publish_condition = jobs["publish"]["if"]
+    assert "github.event_name == 'push'" in publish_condition
+    assert "needs.publication-gate.outputs.approved == 'true'" in publish_condition
+    assert "force_image_build" not in publish_condition
+    assert jobs["promote"]["needs"] == ["changes", "publish", "attest-image"]
+    assert "github.event_name == 'push'" in jobs["chart-promotion"]["if"]
+    assert jobs["image"]["if"] == "needs.changes.outputs.image_required == 'true'"
     action_pattern = re.compile(r"uses:\s+[^\s@]+@([0-9a-f]{40})(?:\s|$)")
     uses = [line for line in text.splitlines() if "uses:" in line]
     assert all(action_pattern.search(line) for line in uses), uses
