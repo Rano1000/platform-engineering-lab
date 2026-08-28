@@ -22,9 +22,12 @@ listener_policy=$listener
 created_pods=''
 diagnostic_pods=''
 diagnostics_complete=0
+cleanup_failed=0
+created_pod_cleanup_attempted=0
 identity=''
 worker=''
 python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-dir --base "$gnt_artifact_base" --root "$diagnostics" --path "$diagnostics/pods"
+python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-dir --base "$gnt_artifact_base" --root "$diagnostics" --path "$diagnostics/cleanup"
 
 sanitize_file() (
   gnt_sanitize_source=$1
@@ -95,17 +98,34 @@ validate_diagnostics() (
   find "$diagnostics" -type f -print0 | xargs -0 python3 "$SCRIPT_DIR/redact-network-diagnostics.py"
 )
 
-cleanup_resources() (
-  # shellcheck disable=SC2086 # Internal Pod names are stored as a whitespace-delimited list.
-  for gnt_cleanup_pod in $created_pods; do
-    kubectl_lab delete pod "$gnt_cleanup_pod" --namespace "$ARGOCD_NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  done
-  kubectl_lab delete networkpolicy "$listener_policy" --namespace "$ARGOCD_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
-  kubectl_lab delete pod "$listener" --namespace "$ARGOCD_NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+cleanup_resource() (
+  gnt_cleanup_kind=$1 gnt_cleanup_name=$2 gnt_cleanup_uid=$3
+  gnt_cleanup_slug=$(printf '%s-%s' "$gnt_cleanup_kind" "$gnt_cleanup_name" | tr '/' '_')
+  gnt_cleanup_output=$diagnostics/cleanup/$gnt_cleanup_slug.json
+  python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-output --base "$gnt_artifact_base" --root "$diagnostics" --path "$gnt_cleanup_output"
+  python3 "$SCRIPT_DIR/cleanup-kubernetes-resource.py" cleanup \
+    --context "$EXPECTED_CONTEXT" --kind "$gnt_cleanup_kind" --namespace "$ARGOCD_NAMESPACE" \
+    --name "$gnt_cleanup_name" --uid "$gnt_cleanup_uid" --timeout-seconds "$OUTER_TIMEOUT_SECONDS" \
+    --output "$gnt_cleanup_output"
 )
+
+cleanup_resources() {
+  gnt_cleanup_status=0
+  if [ -n "${created_pod_uid:-}" ] && [ "$created_pod_cleanup_attempted" -eq 0 ]; then
+    cleanup_resource pod "$created_pods" "$created_pod_uid" || gnt_cleanup_status=1
+  fi
+  if [ -n "${listener_policy_uid:-}" ]; then
+    cleanup_resource networkpolicy "$listener_policy" "$listener_policy_uid" || gnt_cleanup_status=1
+  fi
+  if [ -n "${listener_uid:-}" ]; then
+    cleanup_resource pod "$listener" "$listener_uid" || gnt_cleanup_status=1
+  fi
+  return "$gnt_cleanup_status"
+}
 
 finish() {
   gnt_finish_status=$?
+  trap - EXIT
   set +e
   capture_diagnostics
   if validate_diagnostics; then
@@ -114,9 +134,17 @@ finish() {
     printf 'FAIL  diagnostics are incomplete or contain credential-bearing data; temporary resources were preserved.\n' >&2
     gnt_finish_status=1
   fi
-  if [ "$diagnostics_complete" = 1 ]; then cleanup_resources; fi
+  if [ "$diagnostics_complete" = 1 ]; then
+    cleanup_resources
+    gnt_finish_cleanup_status=$?
+    if [ "$gnt_finish_cleanup_status" -ne 0 ]; then
+      cleanup_failed=1
+      printf 'FAIL  one or more temporary resources failed UID-safe cleanup; see retained cleanup evidence.\n' >&2
+    fi
+  fi
   rm -rf "$temporary"
   printf 'Network diagnostics: %s\n' "$diagnostics"
+  if [ "$gnt_finish_status" -eq 0 ] && [ "$cleanup_failed" -ne 0 ]; then gnt_finish_status=1; fi
   exit "$gnt_finish_status"
 }
 trap finish EXIT
@@ -158,6 +186,8 @@ fi
 
 listener_overrides=$(printf '{"spec":{"nodeName":"%s","automountServiceAccountToken":false,"terminationGracePeriodSeconds":1,"securityContext":{"runAsNonRoot":true,"runAsUser":10001,"runAsGroup":10001,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"listener","image":"%s","imagePullPolicy":"IfNotPresent","command":["python","-c"],"args":["import socket; s=socket.socket(); s.bind((\u00270.0.0.0\u0027,6443)); s.listen(); s.accept()"],"ports":[{"containerPort":6443}],"resources":{"requests":{"cpu":"5m","memory":"16Mi"},"limits":{"cpu":"25m","memory":"32Mi"}},"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}}]}}' "$other_worker" "$image")
 kubectl_lab run "$listener" --namespace "$ARGOCD_NAMESPACE" --restart=Never --image="$image" --labels="platform.engineering-lab/network-test-listener=$suffix" --overrides="$listener_overrides"
+listener_uid=$(kubectl_lab get pod "$listener" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.metadata.uid}')
+[ -n "$listener_uid" ] || die 'Temporary negative listener UID is missing.'
 kubectl_lab wait --namespace "$ARGOCD_NAMESPACE" --for=condition=Ready "pod/$listener" --timeout="${OUTER_TIMEOUT_SECONDS}s"
 listener_ip=$(kubectl_lab get pod "$listener" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.status.podIP}')
 [ -n "$listener_ip" ] || die 'Temporary negative listener has no Pod IP.'
@@ -174,6 +204,8 @@ spec:
       ports: [{protocol: TCP, port: 6443}]
 EOF
 kubectl_lab apply -f "$temporary/listener-policy.yaml"
+listener_policy_uid=$(kubectl_lab get networkpolicy "$listener_policy" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.metadata.uid}')
+[ -n "$listener_policy_uid" ] || die 'Temporary negative listener policy UID is missing.'
 
 validate_result() (
   gnt_result_log=$1 gnt_result_status=$2 gnt_result_name=$3 gnt_result_identity=$4
@@ -204,6 +236,9 @@ run_case() {
   diagnostic_pods="$diagnostic_pods $gnt_case_pod"
   gnt_case_overrides=$(python3 "$SCRIPT_DIR/network-probe.py" pod-overrides --node "$worker" --image "$image" --test-name "$gnt_case_name" --identity "$gnt_case_identity" --host "$gnt_case_host" --port "$gnt_case_port" --expected "$gnt_case_expected" --mode "$gnt_case_mode" --timeout "$INNER_TIMEOUT_SECONDS")
   kubectl_lab run "$gnt_case_pod" --namespace "$ARGOCD_NAMESPACE" --restart=Never --image="$image" --labels="$gnt_case_labels" --overrides="$gnt_case_overrides"
+  created_pod_uid=$(kubectl_lab get pod "$gnt_case_pod" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.metadata.uid}')
+  [ -n "$created_pod_uid" ] || return 1
+  created_pod_cleanup_attempted=0
   gnt_case_elapsed=0 gnt_case_phase=''
   while [ "$gnt_case_elapsed" -lt "$OUTER_TIMEOUT_SECONDS" ]; do
     gnt_case_phase=$(kubectl_lab get pod "$gnt_case_pod" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || true)
@@ -213,8 +248,11 @@ run_case() {
   capture_diagnostics
   [ "$gnt_case_phase" = Succeeded ] || return 1
   validate_result "$diagnostics/pods/$gnt_case_pod/pod.log" "$diagnostics/pods/$gnt_case_pod/pod.json" "$gnt_case_name" "$gnt_case_identity" "$worker" "$gnt_case_host" "$gnt_case_port" "$gnt_case_expected"
-  kubectl_lab delete pod "$gnt_case_pod" --namespace "$ARGOCD_NAMESPACE" --wait=true >/dev/null
+  created_pod_cleanup_attempted=1
+  cleanup_resource pod "$gnt_case_pod" "$created_pod_uid"
   created_pods=''
+  created_pod_uid=''
+  created_pod_cleanup_attempted=0
 }
 
 hook_labels='app.kubernetes.io/name=argocd-redis-secret-init,app.kubernetes.io/component=redis-secret-init,app.kubernetes.io/instance=argocd'

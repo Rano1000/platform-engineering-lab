@@ -78,6 +78,8 @@ An A/B/C snapshot mismatch means the protected API identity changed during insta
 
 If a GitOps network assertion fails, inspect its unique directory under `.artifacts/gitops-network`. Every probe log is one JSON object naming the source identity, worker, destination, expectation, observation, duration, exit code, and error category. Pod status, termination state, description, events, policies, EndpointSlice, and node evidence are captured before cleanup. An empty or unsafe diagnostic set deliberately leaves temporary resources for separate inspection.
 
+Cleanup evidence is stored beside those records under `cleanup/`. Each JSON file records the original UID, delete command output and status, final GET, duration, and classification. A `NotFound` race is successful only when the final GET independently proves the original UID is absent. Authorization, connectivity, timeout, malformed-response, surviving-UID, and name-reuse results fail closed without deleting a replacement resource.
+
 The original preflight combined API access and two denied destinations in one silent process, then waited only for Pod success. Its timeout therefore could not identify which connection blocked, and cleanup removed the logs. The corrected harness uses one operation per Pod and treats a terminal `Failed` phase immediately rather than waiting for the outer deadline.
 
 A retry intentionally refuses while the obsolete `networkpolicy/argocd-redis-secret-init` from the failed installation remains. Remove it only through a separately approved exact-name cleanup together with the previously recorded hook ServiceAccount, Role, RoleBinding, Job, and Pod residuals. Do not remove baseline resource controls or unrelated NetworkPolicies.

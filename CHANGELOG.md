@@ -28,6 +28,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Make GitOps network-test cleanup UID-aware, observable, idempotent, and tolerant only of verified deletion races.
 - Isolate POSIX shell diagnostic helper state and reject artifact path traversal, symlinks, and file-directory collisions.
 - Split ambiguous GitOps network checks into bounded single-assertion Pods with structured, sanitized pre-cleanup diagnostics.
 - Replace ineffective pre-DNAT Kubernetes Service allowances with verified post-DNAT API endpoint policies for Argo CD.

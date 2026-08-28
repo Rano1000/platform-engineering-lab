@@ -158,7 +158,9 @@ def validate_network_policies() -> None:
     probe = (ROOT / "scripts/network-probe.py").read_text(encoding="utf-8")
     assert "automountServiceAccountToken" in probe and '"http_authorization_response"' in probe
     assert "validate-diagnostic-path.py" in runtime_test and "gnt_case_" in runtime_test
-    assert "sanitize_file() (" in runtime_test and "cleanup_resources() (" in runtime_test
+    assert "sanitize_file() (" in runtime_test and "cleanup_resource() (" in runtime_test
+    assert "cleanup-kubernetes-resource.py" in runtime_test
+    assert "created_pod_uid" in runtime_test and "listener_policy_uid" in runtime_test and "listener_uid" in runtime_test
     installer = (ROOT / "scripts/gitops.sh").read_text(encoding="utf-8")
     assert installer.index("snapshot-a-policies.yaml") < installer.index("test-gitops-network.sh") < installer.index("helm upgrade")
     assert all(f"snapshot-{name}" in installer for name in ("a", "b", "c"))
