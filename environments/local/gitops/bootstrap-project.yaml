@@ -12,9 +12,7 @@ spec:
   destinations:
     - server: https://kubernetes.default.svc
       namespace: gitops
-  clusterResourceBlacklist:
-    - group: "*"
-      kind: "*"
+  clusterResourceWhitelist: []
   namespaceResourceWhitelist:
     - group: argoproj.io
       kind: Application

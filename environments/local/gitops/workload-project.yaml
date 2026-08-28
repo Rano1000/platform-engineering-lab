@@ -12,9 +12,7 @@ spec:
   destinations:
     - server: https://kubernetes.default.svc
       namespace: platform-apps
-  clusterResourceBlacklist:
-    - group: "*"
-      kind: "*"
+  clusterResourceWhitelist: []
   namespaceResourceWhitelist:
     - {group: "", kind: ConfigMap}
     - {group: "", kind: Service}

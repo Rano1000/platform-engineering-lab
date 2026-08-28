@@ -28,6 +28,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Express both dedicated AppProjects' cluster-resource denial as an empty allowlist and test their exact namespaced permissions.
 - Adopt Argo CD's permissive built-in default project through an identity-bound, dry-run-validated, resource-specific ownership transfer.
 - Harden the built-in Argo CD `default` AppProject to a checksummed repository-owned deny-all specification after controller installation.
 - Distinguish an expected absent pre-bootstrap Application from missing CRDs, authorization failures, API failures, and malformed responses.

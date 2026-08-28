@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import re
@@ -102,13 +103,15 @@ def validate_projects_and_root() -> None:
     }
     assert allowed == expected
     assert not any("*" in item for item in allowed)
-    assert spec["clusterResourceBlacklist"] == [{"group": "*", "kind": "*"}]
+    assert spec["clusterResourceWhitelist"] == []
+    assert "clusterResourceBlacklist" not in spec
     bootstrap = yaml.safe_load((ROOT / "environments/local/gitops/bootstrap-project.yaml").read_text(encoding="utf-8"))
     bootstrap_spec = bootstrap["spec"]
     assert bootstrap_spec["sourceRepos"] == [APP_REPOSITORY]
     assert bootstrap_spec["destinations"] == [{"server": "https://kubernetes.default.svc", "namespace": "gitops"}]
     assert bootstrap_spec["namespaceResourceWhitelist"] == [{"group": "argoproj.io", "kind": "Application"}]
-    assert bootstrap_spec["clusterResourceBlacklist"] == [{"group": "*", "kind": "*"}]
+    assert bootstrap_spec["clusterResourceWhitelist"] == []
+    assert "clusterResourceBlacklist" not in bootstrap_spec
     root = yaml.safe_load((ROOT / "environments/local/gitops/root-application.yaml").read_text(encoding="utf-8"))
     assert root["metadata"]["name"] == "platform-environment"
     assert "finalizers" not in root["metadata"]
@@ -121,6 +124,15 @@ def validate_projects_and_root() -> None:
     }
     assert root["spec"]["destination"] == {"server": "https://kubernetes.default.svc", "namespace": "gitops"}
     assert "automated" not in root["spec"].get("syncPolicy", {})
+    expected_checksums = {
+        "bootstrap-project.yaml": "c8aeeac80903c974d4777b3924fb90a031fc9d71d7c29db917313332f0d4a481",
+        "workload-project.yaml": "b09cdc47dab5fd2586597e21d4850163df937ead281905936efa9ef714cf487e",
+        "root-application.yaml": "6d70580cd848fd52a08476c8ecb98ea28e1f877a4bb18fd681ff7f82cad2a989",
+    }
+    for name, expected_checksum in expected_checksums.items():
+        value = yaml.safe_load((ROOT / "environments/local/gitops" / name).read_text(encoding="utf-8"))
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+        assert hashlib.sha256(encoded).hexdigest() == expected_checksum
     application_directory = ROOT / "environments/local/gitops/applications"
     for manifest in application_directory.glob("*.yaml"):
         child = yaml.safe_load(manifest.read_text(encoding="utf-8"))
