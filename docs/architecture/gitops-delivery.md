@@ -25,6 +25,8 @@ The manually bootstrapped `platform-environment` root Application tracks `main` 
 
 The child `golden-path-api` Application uses the separate `platform-apps` project. That project constrains the repository, cluster, namespace, and workload resource kinds. AppProject cannot constrain a repository subdirectory, so repository validation and guarded automation enforce both environment and chart paths.
 
+Controller installation retains Argo CD's built-in `default` AppProject but replaces its permissions with a repository-owned deny-all specification. It contains no permitted repositories, destinations, or resource kinds. This prevents an unreviewed Application from bypassing the dedicated bootstrap and workload project boundaries.
+
 Synchronization has two manual stages. First, the root diff updates only the child Application specification. Second, a separate child diff updates workload resources. Automatic synchronization, self-healing, pruning, cascading-deletion finalizers, and namespace creation are absent at both levels.
 
 Three revisions have separate meanings:

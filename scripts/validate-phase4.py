@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import re
 
@@ -170,6 +171,17 @@ def validate_network_policies() -> None:
     assert installer.count("helm upgrade --install") == 1
     assert "--atomic --wait" in installer and '--timeout "${ARGOCD_INSTALL_TIMEOUT_SECONDS}s"' in installer
     assert "capture-gitops-install-failure.py" in installer
+    default_project = documents(ROOT / "platform/addons/argocd/default-project.yaml")[0]
+    assert default_project["metadata"]["name"] == "default"
+    assert default_project["metadata"]["namespace"] == "gitops"
+    assert default_project["metadata"]["labels"]["app.kubernetes.io/managed-by"] == "platform-engineering-lab"
+    assert default_project["spec"] == {
+        "description": "Deny-all default project; applications must use a dedicated project.",
+        "sourceRepos": [], "destinations": [], "clusterResourceWhitelist": [], "namespaceResourceWhitelist": [],
+    }
+    assert '"*"' not in json.dumps(default_project)
+    assert "harden_default_project" in installer and "--server-side" in installer
+    assert "check-optional-argo-application.py" in (ROOT / "scripts/validate-gitops.sh").read_text(encoding="utf-8")
 
 
 def validate_workflow() -> None:

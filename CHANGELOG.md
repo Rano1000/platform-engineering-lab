@@ -28,6 +28,9 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Harden the built-in Argo CD `default` AppProject to a checksummed repository-owned deny-all specification after controller installation.
+- Distinguish an expected absent pre-bootstrap Application from missing CRDs, authorization failures, API failures, and malformed responses.
+
 - Give the single atomic Argo CD installation 15 minutes for initial pinned-image pulls and retain bounded failure diagnostics.
 - Make GitOps network-test cleanup UID-aware, observable, idempotent, and tolerant only of verified deletion races.
 - Isolate POSIX shell diagnostic helper state and reject artifact path traversal, symlinks, and file-directory collisions.

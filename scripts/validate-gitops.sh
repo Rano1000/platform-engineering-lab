@@ -51,6 +51,17 @@ if [ -n "$images" ] && ! printf '%s\n' "$images" | grep -Ev '@sha256:[0-9a-f]{64
 if kubectl_lab get service --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{range .items[*]}{.spec.type}{"\n"}{end}' | grep -Ev '^ClusterIP$' >/dev/null; then fail 'Argo CD exposes a non-ClusterIP Service.'; else pass 'Argo CD Services are internal ClusterIP only.'; fi
 if kubectl_lab get ingress,httproute --namespace "$ARGOCD_NAMESPACE" --ignore-not-found -o name 2>/dev/null | grep . >/dev/null; then fail 'Argo CD has an external route.'; else pass 'Argo CD has no Ingress or HTTPRoute.'; fi
 if kubectl_lab get networkpolicy --namespace "$ARGOCD_NAMESPACE" -o name | grep -F 'argocd-repo-server' >/dev/null; then pass 'repository-server network isolation exists.'; else fail 'repository-server network isolation is missing.'; fi
+if kubectl_lab get appproject default --namespace "$ARGOCD_NAMESPACE" -o json >"$temporary/default-project.json" 2>"$temporary/default-project.err"; then
+  default_checksum=$(python3 "$SCRIPT_DIR/validate-default-appproject.py" \
+    --expected "$ARGOCD_DEFAULT_PROJECT" --live "$temporary/default-project.json" 2>"$temporary/default-project-validation.err" || true)
+  if [ "$default_checksum" = "$ARGOCD_DEFAULT_PROJECT_SHA256" ]; then
+    pass "default AppProject is repository-owned and deny-all ($default_checksum)."
+  else
+    fail 'default AppProject is permissive or differs from repository ownership.'
+  fi
+else
+  fail 'default AppProject is missing or cannot be read.'
+fi
 for project in platform-bootstrap platform-apps; do
   if kubectl_lab get appproject "$project" --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then
     pass "AppProject $project exists."
@@ -66,9 +77,17 @@ for application in "$ARGOCD_ROOT_APPLICATION" "$ARGOCD_APPLICATION"; do
     if [ -z "$finalizers" ]; then pass "$application has no cascading-deletion finalizer."; else fail "$application has an unexpected finalizer."; fi
   fi
 done
-if require_argocd_application 2>/dev/null; then
-  accepted=$(kubectl_lab get application "$ARGOCD_APPLICATION" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.status.health.status}' 2>/dev/null || true)
-  if [ -n "$accepted" ]; then pass "Application health is reported as $accepted."; else fail 'Application health is not reported.'; fi
+if application_state=$(python3 "$SCRIPT_DIR/check-optional-argo-application.py" \
+  --context "$EXPECTED_CONTEXT" --namespace "$ARGOCD_NAMESPACE" --name "$ARGOCD_APPLICATION" 2>"$temporary/application-lookup.err"); then
+  case $application_state in
+    absent) pass "Application $ARGOCD_APPLICATION is absent as expected before bootstrap." ;;
+    present)
+      accepted=$(kubectl_lab get application "$ARGOCD_APPLICATION" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.status.health.status}' 2>/dev/null || true)
+      if [ -n "$accepted" ]; then pass "Application health is reported as $accepted."; else fail 'Application is present but health is not reported.'; fi ;;
+    *) fail "optional Application lookup returned an unknown state: $application_state." ;;
+  esac
+else
+  fail "optional Application lookup failed safely: ${application_state:-unknown}."
 fi
 printf '\nSummary: %s PASS, %s FAIL\n' "$PASS_COUNT" "$FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ]

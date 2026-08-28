@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: gitops
+  labels:
+    app.kubernetes.io/component: project-guard
+    app.kubernetes.io/managed-by: platform-engineering-lab
+    app.kubernetes.io/part-of: argocd
+    platform.engineering-lab/owner: platform-team
+  annotations:
+    platform.engineering-lab/purpose: deny-all-default-project
+spec:
+  description: Deny-all default project; applications must use a dedicated project.
+  sourceRepos: []
+  destinations: []
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist: []

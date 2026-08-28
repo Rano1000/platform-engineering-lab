@@ -13,6 +13,29 @@ verify_chart() {
   verify_argocd_chart "$1"
 }
 
+harden_default_project() (
+  gitops_project_tmp=$(mktemp -d)
+  trap 'rm -rf "$gitops_project_tmp"' EXIT HUP INT TERM
+  kubectl_lab get appproject default --namespace "$ARGOCD_NAMESPACE" -o json >"$gitops_project_tmp/live-before.json"
+  python3 "$SCRIPT_DIR/validate-default-appproject.py" --preflight --live "$gitops_project_tmp/live-before.json"
+  kubectl_lab apply --server-side --field-manager=platform-engineering-lab -f "$ARGOCD_DEFAULT_PROJECT"
+  kubectl_lab get appproject default --namespace "$ARGOCD_NAMESPACE" -o json >"$gitops_project_tmp/live-after.json"
+  gitops_project_checksum=$(python3 "$SCRIPT_DIR/validate-default-appproject.py" \
+    --expected "$ARGOCD_DEFAULT_PROJECT" --live "$gitops_project_tmp/live-after.json")
+  [ "$gitops_project_checksum" = "$ARGOCD_DEFAULT_PROJECT_SHA256" ] ||
+    die "Default AppProject checksum mismatch: $gitops_project_checksum."
+  printf 'PASS  default AppProject is repository-owned and deny-all (%s).\n' "$gitops_project_checksum"
+)
+
+harden_default_project_guarded() {
+  require_lab_runtime
+  helm --kube-context "$EXPECTED_CONTEXT" status "$ARGOCD_RELEASE" --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1 ||
+    die "Argo CD release '$ARGOCD_RELEASE' is not installed."
+  confirm_exact argocd-default-project-deny-all \
+    "Replace only gitops/AppProject default with the repository-owned deny-all specification."
+  harden_default_project
+}
+
 install_gitops() {
   require_lab_runtime
   require_command docker
@@ -51,6 +74,7 @@ install_gitops() {
     fi
     return "$gitops_helm_status"
   fi
+  harden_default_project
   resolve_argocd_api_endpoint "$temporary" snapshot-c >/dev/null
   compare_argocd_api_snapshots "$temporary/snapshot-b-identity.json" "$temporary/snapshot-c-identity.json"
   verify_live_argocd_api_policies "$temporary/snapshot-c-identity.json" "$temporary/live-after.json"
@@ -191,12 +215,13 @@ uninstall_gitops() {
 }
 
 usage() {
-  printf 'usage: %s {install|bootstrap|status|root-status|root-diff|root-sync|app-status|app-diff|app-sync|validate|uninstall}\n' "$0" >&2
+  printf 'usage: %s {install|harden-default-project|bootstrap|status|root-status|root-diff|root-sync|app-status|app-diff|app-sync|validate|uninstall}\n' "$0" >&2
   exit 2
 }
 
 case ${1:-} in
   install) install_gitops ;;
+  harden-default-project) harden_default_project_guarded ;;
   bootstrap) bootstrap_gitops ;;
   status) status_gitops ;;
   root-status) root_status ;;
