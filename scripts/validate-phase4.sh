@@ -39,6 +39,7 @@ python3 scripts/network-probe.py self-test
 python3 scripts/validate-diagnostic-path.py self-test
 python3 scripts/cleanup-kubernetes-resource.py self-test
 python3 scripts/test-gitops-network-harness.py
+python3 scripts/test-gitops-install.py
 python3 scripts/validate-promotion.py --evidence "$temporary/promotion-evidence.json" \
   --application "$temporary/child-application.yaml"
 ./scripts/verify-promotion-artifacts.sh self-test

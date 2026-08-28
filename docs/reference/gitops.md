@@ -32,6 +32,8 @@ Steady-state requests total approximately 275m CPU and 704Mi memory. Combined li
 
 The cleanup guard records each resource UID immediately after creation, checks it again before deletion, and refuses a reused name. The pinned `kubectl` interface has no delete flag for an API UID precondition, so a final exact-name GET is mandatory: only confirmed absence can complete cleanup, and a surviving or replacement UID fails closed without an automatic retry.
 
+Controller installation executes Helm once with `--atomic`, `--wait`, and a fixed 15-minute timeout. A first installation can spend several minutes pulling digest-pinned images. Cached pulls are normally faster but are never assumed. On failure, sanitized scheduling, image-pull, waiting-state, hook, readiness, Helm, CRD, and RBAC evidence is retained under `.artifacts/gitops-install` before the installer stops.
+
 The `argocd` CLI must be exactly v3.5.2 for diff and sync. It uses core mode and Kubernetes authentication; no Argo administrator or public server is required.
 
 Every sync requires the exact context, Application identity, repository, chart revision, image source revision, digest, and a clean local `main` synchronized with `origin/main`. The root alone tracks `main` for change detection. Root diff and sync fetch and resolve it to the complete immutable `environmentRevision`; they never pass `main` to the Argo operation.

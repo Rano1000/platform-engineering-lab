@@ -164,6 +164,12 @@ def validate_network_policies() -> None:
     installer = (ROOT / "scripts/gitops.sh").read_text(encoding="utf-8")
     assert installer.index("snapshot-a-policies.yaml") < installer.index("test-gitops-network.sh") < installer.index("helm upgrade")
     assert all(f"snapshot-{name}" in installer for name in ("a", "b", "c"))
+    common = (ROOT / "scripts/lib/gitops-common.sh").read_text(encoding="utf-8")
+    timeout = int(re.search(r"^ARGOCD_INSTALL_TIMEOUT_SECONDS=([0-9]+)$", common, re.MULTILINE).group(1))
+    assert 600 <= timeout <= 1200
+    assert installer.count("helm upgrade --install") == 1
+    assert "--atomic --wait" in installer and '--timeout "${ARGOCD_INSTALL_TIMEOUT_SECONDS}s"' in installer
+    assert "capture-gitops-install-failure.py" in installer
 
 
 def validate_workflow() -> None:

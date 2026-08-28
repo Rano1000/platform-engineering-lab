@@ -28,6 +28,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Give the single atomic Argo CD installation 15 minutes for initial pinned-image pulls and retain bounded failure diagnostics.
 - Make GitOps network-test cleanup UID-aware, observable, idempotent, and tolerant only of verified deletion races.
 - Isolate POSIX shell diagnostic helper state and reject artifact path traversal, symlinks, and file-directory collisions.
 - Split ambiguous GitOps network checks into bounded single-assertion Pods with structured, sanitized pre-cleanup diagnostics.

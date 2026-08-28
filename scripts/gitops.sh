@@ -35,9 +35,22 @@ install_gitops() {
   resolve_argocd_api_endpoint "$temporary" snapshot-b >/dev/null
   compare_argocd_api_snapshots "$temporary/snapshot-a-identity.json" "$temporary/snapshot-b-identity.json"
   verify_live_argocd_api_policies "$temporary/snapshot-b-identity.json" "$temporary/live-immediately-before-helm.json"
-  helm upgrade --install "$ARGOCD_RELEASE" "$archive" --kube-context "$EXPECTED_CONTEXT" \
+  if helm upgrade --install "$ARGOCD_RELEASE" "$archive" --kube-context "$EXPECTED_CONTEXT" \
     --namespace "$ARGOCD_NAMESPACE" --values "$ARGOCD_CONFIG/values.yaml" \
-    --atomic --wait --timeout 300s
+    --atomic --wait --timeout "${ARGOCD_INSTALL_TIMEOUT_SECONDS}s"; then
+    :
+  else
+    gitops_helm_status=$?
+    gitops_failure_root=$REPOSITORY_ROOT/.artifacts/gitops-install/$(date +%s)-$$
+    python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-dir \
+      --base "$REPOSITORY_ROOT/.artifacts/gitops-install" --root "$gitops_failure_root" --path "$gitops_failure_root"
+    if ! python3 "$SCRIPT_DIR/capture-gitops-install-failure.py" \
+      --context "$EXPECTED_CONTEXT" --namespace "$ARGOCD_NAMESPACE" --release "$ARGOCD_RELEASE" \
+      --output "$gitops_failure_root/evidence"; then
+      printf 'WARN  Argo installation failed and diagnostic capture was incomplete: %s\n' "$gitops_failure_root" >&2
+    fi
+    return "$gitops_helm_status"
+  fi
   resolve_argocd_api_endpoint "$temporary" snapshot-c >/dev/null
   compare_argocd_api_snapshots "$temporary/snapshot-b-identity.json" "$temporary/snapshot-c-identity.json"
   verify_live_argocd_api_policies "$temporary/snapshot-c-identity.json" "$temporary/live-after.json"
