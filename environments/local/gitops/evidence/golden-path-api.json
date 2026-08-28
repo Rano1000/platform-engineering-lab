@@ -1,3 +1,43 @@
 {
-  "state": "awaiting-first-verified-promotion"
+  "archiveSha256": "cd27bc03c39d0ae1d5b0c53ae68ffa72ba5fc42a87a01a3df4ab2a036b909b0a",
+  "attestations": {
+    "archive": "verified",
+    "image": "verified",
+    "owner": "Rano1000",
+    "repository": "Rano1000/platform-engineering-lab",
+    "sbom": "verified",
+    "subjects": {
+      "archive": "sha256:cd27bc03c39d0ae1d5b0c53ae68ffa72ba5fc42a87a01a3df4ab2a036b909b0a",
+      "image": "sha256:e12b5835af642aa1ea153ed27b4aa0481c1cf03e434702106bf57dfeeb7a70cf",
+      "sbom": "sha256:f9117f7588c2c66b582fc431299c223fae40767febf2dca90ee63232e0117d0b"
+    }
+  },
+  "chartRevision": "3787c00564553253be81d41ce5ec2b567d4f6d5d",
+  "image": "ghcr.io/rano1000/golden-path-api",
+  "imageDigest": "sha256:e12b5835af642aa1ea153ed27b4aa0481c1cf03e434702106bf57dfeeb7a70cf",
+  "imageSourceRevision": "e4cbf6cfa1817fe8dede7eb80d75bb94131163b2",
+  "ociRevision": "e4cbf6cfa1817fe8dede7eb80d75bb94131163b2",
+  "publication": {
+    "repositoryLinked": true,
+    "visibility": "public"
+  },
+  "sbomSha256": "f9117f7588c2c66b582fc431299c223fae40767febf2dca90ee63232e0117d0b",
+  "scanner": {
+    "databaseUpdatedAt": "2026-08-27T22:10:29.038494572Z",
+    "name": "Trivy",
+    "version": "0.74.0"
+  },
+  "schemaVersion": 2,
+  "vulnerabilities": {
+    "fixableCritical": 0,
+    "fixableHigh": 0,
+    "severityTotals": {
+      "CRITICAL": 5,
+      "HIGH": 29,
+      "LOW": 86,
+      "MEDIUM": 83,
+      "UNKNOWN": 5
+    }
+  },
+  "vulnerabilityReportSha256": "c326c5713d822e3de43b04f07234f1508cf75fe5cb738d6604229259d77f188a"
 }
