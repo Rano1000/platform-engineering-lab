@@ -29,3 +29,5 @@ Read-only commands are `make app-status`, `make app-validate`, and `make app-own
 `make app-network-test` creates uniquely named Pods in `observability`, proves labelled metrics traffic is allowed and unlabelled traffic is denied, and removes both Pods through a cleanup trap.
 
 `make app-recovery-test` displays the exact application Pod, requires its name as confirmation, deletes only that Pod, and verifies that the Deployment restores two replicas.
+
+Runtime validation derives image identity from the active owner. A Helm-owned local release must use an immutable revision tag, `imagePullPolicy: Never`, and the same complete content image ID on both workers and running Pods. An Argo-owned release must use the approved GHCR repository at a complete digest, with matching protected Application annotations and runtime `imageID`. Validation never assumes that the current repository revision has already been built or deployed.

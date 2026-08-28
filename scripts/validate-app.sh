@@ -17,14 +17,32 @@ require_command curl
 require_lab_runtime
 require_app_release
 
-expected_image=$(image_ref)
-for node in "$CLUSTER_NAME-worker" "$CLUSTER_NAME-worker2"; do
-  if docker exec "$node" crictl images 2>/dev/null | grep -F "$APP_NAME" | grep -F "$(image_tag)" >/dev/null 2>&1; then
-    pass "$expected_image is present on $node."
-  else
-    fail "$expected_image is missing from $node."
-  fi
-done
+temporary=$(mktemp -d)
+trap 'rm -rf "$temporary"' EXIT HUP INT TERM
+if argo_application_owns_workload; then
+  source_kind=argocd
+  kubectl_lab get application.argoproj.io "$ARGO_APPLICATION_NAME" --namespace "$ARGO_APPLICATION_NAMESPACE" -o json >"$temporary/source.json"
+else
+  source_kind=helm
+  helm --kube-context "$EXPECTED_CONTEXT" get values "$APP_RELEASE" --namespace "$APP_NAMESPACE" --all -o json >"$temporary/source.json"
+fi
+kubectl_lab get deployment "$APP_DEPLOYMENT" --namespace "$APP_NAMESPACE" -o json >"$temporary/deployment.json"
+kubectl_lab get pods --namespace "$APP_NAMESPACE" -l "app.kubernetes.io/instance=$APP_RELEASE,app.kubernetes.io/name=$APP_NAME" -o json >"$temporary/pods.json"
+node_arguments=
+if [ "$source_kind" = helm ]; then
+  for node in "$CLUSTER_NAME-worker" "$CLUSTER_NAME-worker2"; do
+    docker exec "$node" crictl images --output json >"$temporary/$node.json"
+    node_arguments="$node_arguments --node-images $temporary/$node.json"
+  done
+fi
+# node_arguments contains paths created above and intentionally expands into repeated options.
+# shellcheck disable=SC2086
+if python3 "$SCRIPT_DIR/validate-app-image.py" --source-kind "$source_kind" --source "$temporary/source.json" \
+  --deployment "$temporary/deployment.json" --pods "$temporary/pods.json" $node_arguments; then
+  pass 'deployed application image identity is immutable and internally consistent.'
+else
+  fail 'deployed application image identity validation failed.'
+fi
 
 if kubectl_lab rollout status "deployment/$APP_DEPLOYMENT" --namespace "$APP_NAMESPACE" --timeout=60s >/dev/null 2>&1; then pass 'application rollout is healthy.'; else fail 'application rollout is not healthy.'; fi
 ready=$(kubectl_lab get deployment "$APP_DEPLOYMENT" --namespace "$APP_NAMESPACE" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)
