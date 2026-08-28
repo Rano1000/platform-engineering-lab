@@ -150,7 +150,7 @@ gitops-app-diff: ## Show the pending workload change without syncing.
 gitops-app-sync: ## Confirm and synchronize only the child workload Application.
 	@./scripts/gitops.sh app-sync
 
-gitops-network-test: ## Confirm a temporary hook API/denied-egress runtime test.
+gitops-network-test: ## Run single-assertion Argo API network diagnostics.
 	@./scripts/test-gitops-network.sh
 
 gitops-validate: ## Validate the installed Argo CD runtime without changing it.

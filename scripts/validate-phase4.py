@@ -150,10 +150,13 @@ def validate_network_policies() -> None:
     assert "10.96.0.1" not in template and "0.0.0.0/0" not in template and "endPort:" not in template
     runtime_test = (ROOT / "scripts/test-gitops-network.sh").read_text(encoding="utf-8")
     assert "confirm_exact argocd-api-endpoint-network" in runtime_test
-    assert "('1.1.1.1',443)" in runtime_test and "('$listener_ip',6443)" in runtime_test
-    assert "nodeName" in runtime_test and "trap cleanup" in runtime_test
-    assert "argocd-repo-deny" in runtime_test and "argocd-redis-deny" in runtime_test and "argocd-unlabelled-deny" in runtime_test
-    assert "automountServiceAccountToken\":false" in runtime_test
+    assert "1.1.1.1 443 deny tcp" in runtime_test and '"$listener_ip" 6443 deny tcp' in runtime_test
+    assert "nodeName" in runtime_test and "trap finish EXIT" in runtime_test
+    assert "repo-api-deny" in runtime_test and "redis-api-deny" in runtime_test and "unlabelled-api-deny" in runtime_test
+    assert "capture_diagnostics" in runtime_test and runtime_test.index("capture_diagnostics") < runtime_test.index("cleanup_resources")
+    assert "INNER_TIMEOUT_SECONDS=2" in runtime_test and "OUTER_TIMEOUT_SECONDS=20" in runtime_test
+    probe = (ROOT / "scripts/network-probe.py").read_text(encoding="utf-8")
+    assert "automountServiceAccountToken" in probe and '"http_authorization_response"' in probe
     installer = (ROOT / "scripts/gitops.sh").read_text(encoding="utf-8")
     assert installer.index("snapshot-a-policies.yaml") < installer.index("test-gitops-network.sh") < installer.index("helm upgrade")
     assert all(f"snapshot-{name}" in installer for name in ("a", "b", "c"))

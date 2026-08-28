@@ -25,7 +25,7 @@ Steady-state requests total approximately 275m CPU and 704Mi memory. Combined li
 - `make gitops-root-sync`: confirm stage 1 and update only the child Application specification.
 - `make gitops-app-status` and `make gitops-app-diff`: read-only workload status and diff.
 - `make gitops-app-sync`: separately confirm stage 2 and update workload resources.
-- `make gitops-network-test`: run worker-pinned positive and negative API egress tests; cleanup traps remove every temporary Pod.
+- `make gitops-network-test`: run worker-pinned, single-assertion API egress diagnostics. Each result and its sanitized Kubernetes evidence are retained under `.artifacts/gitops-network`; cleanup follows successful capture.
 - `make gitops-validate`: read-only runtime security and health validation.
 - `make gitops-uninstall`: guarded removal that refuses while the Application exists.
 - `make app-ownership-status`: report Helm or Argo ownership without mutation.
@@ -47,6 +47,10 @@ Stable policies deliberately contain no Kubernetes Service ClusterIP allowance. 
 The canonical endpoint record includes cluster and context, Service and EndpointSlice identities, endpoint address and port, control-plane and kube-apiserver identities, and kind Docker network attachment. Its SHA-256 is recorded on every generated policy. Snapshots A, B, and C must match, and live policies are checked before and after Helm. No missing, multiple, non-Ready, malformed, broad, or changed endpoint is accepted.
 
 This behavior is specific to the observed kind/kindnet post-DNAT enforcement path. It must be regenerated after cluster recreation. Traefik's older ClusterIP rule and control-plane placement remain unchanged pending a separate review.
+
+The probe uses only Python standard-library networking from the already deployed immutable Golden Path image. API success means TCP and TLS completed; an HTTP 401 or 403 is an expected connectivity result and does not require an application credential. Timeout, refusal, DNS, TLS, HTTP authorization, socket, and process failures are reported separately. One Pod performs one assertion, with a two-second inner timeout and twenty-second outer deadline.
+
+Diagnostics include the structured result, Pod JSON and termination state, description, events, applied policies, EndpointSlice identity, and worker node. Environment variables, credential mounts, Secret fields, tokens, and private-key patterns are sanitized or rejected before entering the ignored artifact directory.
 
 ## Removal and ownership reversal
 

@@ -6,7 +6,7 @@ The root Application is bootstrapped once. It observes merged child Application 
 2. Inspect existing application ownership with `make app-ownership-status`.
 3. Review Argo chart values, cluster-scoped CRDs, RBAC, NetworkPolicies, and resource controls.
 4. Obtain separate runtime approval, then run `make gitops-install`. The guard discovers and verifies the API endpoint, prints its identity checksum, applies exact generated policies, and asks for the exact cluster name.
-5. The installation transaction runs worker-pinned positive and negative network checks, compares endpoint snapshots A and B, and only then starts Helm. Snapshot C and live-policy checks run after Helm. A failed check stops without widening a rule or retrying automatically.
+5. The installation transaction runs worker-pinned, single-assertion network checks, compares endpoint snapshots A and B, and only then starts Helm. Each operation writes structured and sanitized evidence beneath `.artifacts/gitops-network` before temporary cleanup. Snapshot C and live-policy checks run after Helm. A failed check stops without widening a rule or retrying automatically.
 6. Run `make gitops-validate`.
 7. Run `make gitops-bootstrap` once. It applies both restricted projects and `platform-environment`; it does not apply a child or workload.
 8. After a promotion merges, run `make gitops-root-status` and `make gitops-root-diff`. The diff reports the complete `environmentRevision` and deterministic child-specification SHA-256.

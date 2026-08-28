@@ -76,4 +76,8 @@ If `argocd-redis-secret-init` times out while checking its Secret, inspect the e
 
 An A/B/C snapshot mismatch means the protected API identity changed during installation. Preserve the state for diagnosis and start a separately approved clean transaction after the endpoint is stable; do not retry automatically. Generated endpoint policies must be regenerated after kind cluster recreation.
 
+If a GitOps network assertion fails, inspect its unique directory under `.artifacts/gitops-network`. Every probe log is one JSON object naming the source identity, worker, destination, expectation, observation, duration, exit code, and error category. Pod status, termination state, description, events, policies, EndpointSlice, and node evidence are captured before cleanup. An empty or unsafe diagnostic set deliberately leaves temporary resources for separate inspection.
+
+The original preflight combined API access and two denied destinations in one silent process, then waited only for Pod success. Its timeout therefore could not identify which connection blocked, and cleanup removed the logs. The corrected harness uses one operation per Pod and treats a terminal `Failed` phase immediately rather than waiting for the outer deadline.
+
 A retry intentionally refuses while the obsolete `networkpolicy/argocd-redis-secret-init` from the failed installation remains. Remove it only through a separately approved exact-name cleanup together with the previously recorded hook ServiceAccount, Role, RoleBinding, Job, and Pod residuals. Do not remove baseline resource controls or unrelated NetworkPolicies.
