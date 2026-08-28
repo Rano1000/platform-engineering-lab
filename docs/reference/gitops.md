@@ -26,11 +26,11 @@ Steady-state requests total approximately 275m CPU and 704Mi memory. Combined li
 - `make gitops-app-status` and `make gitops-app-diff`: read-only workload status and diff.
 - `make gitops-app-sync`: separately confirm stage 2 and update workload resources.
 - `make gitops-network-test`: run worker-pinned, single-assertion API egress diagnostics. Each result and its sanitized Kubernetes evidence are retained under `.artifacts/gitops-network`; UID-aware cleanup evidence records command output, final identity, and deletion-race classification.
-
-The cleanup guard records each resource UID immediately after creation, checks it again before deletion, and refuses a reused name. The pinned `kubectl` interface has no delete flag for an API UID precondition, so a final exact-name GET is mandatory: only confirmed absence can complete cleanup, and a surviving or replacement UID fails closed without an automatic retry.
 - `make gitops-validate`: read-only runtime security and health validation.
 - `make gitops-uninstall`: guarded removal that refuses while the Application exists.
 - `make app-ownership-status`: report Helm or Argo ownership without mutation.
+
+The cleanup guard records each resource UID immediately after creation, checks it again before deletion, and refuses a reused name. The pinned `kubectl` interface has no delete flag for an API UID precondition, so a final exact-name GET is mandatory: only confirmed absence can complete cleanup, and a surviving or replacement UID fails closed without an automatic retry.
 
 The `argocd` CLI must be exactly v3.5.2 for diff and sync. It uses core mode and Kubernetes authentication; no Argo administrator or public server is required.
 
