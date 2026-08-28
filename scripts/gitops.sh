@@ -15,15 +15,32 @@ verify_chart() {
 
 install_gitops() {
   require_lab_runtime
+  require_command docker
   temporary=$(mktemp -d)
   trap 'rm -rf "$temporary"' EXIT HUP INT TERM
   archive=$(verify_chart "$temporary")
-  confirm_exact "$CLUSTER_NAME" "Install pinned Argo CD $ARGOCD_VERSION into '$ARGOCD_NAMESPACE' on '$EXPECTED_CONTEXT'. This creates cluster-scoped CRDs and RBAC."
+  identity_checksum=$(resolve_argocd_api_endpoint "$temporary" snapshot-a)
+  printf 'Verified Kubernetes API endpoint identity (%s):\n' "$identity_checksum"
+  cat "$temporary/snapshot-a-identity.json"
+  if kubectl_lab get networkpolicy argocd-redis-secret-init --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then
+    die 'Legacy ClusterIP hook policy remains from the failed installation. Obtain exact-name cleanup approval before retrying.'
+  fi
+  confirm_exact "$CLUSTER_NAME" "Install pinned Argo CD $ARGOCD_VERSION into '$ARGOCD_NAMESPACE' on '$EXPECTED_CONTEXT'. This creates cluster-scoped CRDs and RBAC. Verified API endpoint identity: $identity_checksum."
   kubectl_lab apply -f "$ARGOCD_CONFIG/resource-controls.yaml"
   kubectl_lab apply -f "$ARGOCD_CONFIG/network-policies.yaml"
+  kubectl_lab apply -f "$temporary/snapshot-a-policies.yaml"
+  verify_live_argocd_api_policies "$temporary/snapshot-a-identity.json" "$temporary/live-before.json"
+  GITOPS_NETWORK_IDENTITY=$temporary/snapshot-a-identity.json GITOPS_NETWORK_NONINTERACTIVE=1 \
+    "$SCRIPT_DIR/test-gitops-network.sh"
+  resolve_argocd_api_endpoint "$temporary" snapshot-b >/dev/null
+  compare_argocd_api_snapshots "$temporary/snapshot-a-identity.json" "$temporary/snapshot-b-identity.json"
+  verify_live_argocd_api_policies "$temporary/snapshot-b-identity.json" "$temporary/live-immediately-before-helm.json"
   helm upgrade --install "$ARGOCD_RELEASE" "$archive" --kube-context "$EXPECTED_CONTEXT" \
     --namespace "$ARGOCD_NAMESPACE" --values "$ARGOCD_CONFIG/values.yaml" \
     --atomic --wait --timeout 300s
+  resolve_argocd_api_endpoint "$temporary" snapshot-c >/dev/null
+  compare_argocd_api_snapshots "$temporary/snapshot-b-identity.json" "$temporary/snapshot-c-identity.json"
+  verify_live_argocd_api_policies "$temporary/snapshot-c-identity.json" "$temporary/live-after.json"
 }
 
 bootstrap_gitops() {

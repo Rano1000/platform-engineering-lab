@@ -34,6 +34,7 @@ python3 scripts/validate-promotion.py --self-test
 python3 scripts/update-chart-promotion.py --self-test
 python3 scripts/validate-reconciliation.py --self-test
 python3 scripts/validate-app-image.py --self-test
+python3 scripts/resolve-kubernetes-api.py self-test
 python3 scripts/validate-promotion.py --evidence "$temporary/promotion-evidence.json" \
   --application "$temporary/child-application.yaml"
 ./scripts/verify-promotion-artifacts.sh self-test

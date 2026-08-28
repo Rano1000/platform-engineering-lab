@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Added
 
+- Fail-closed runtime discovery, identity checks, exact `/32` Argo API policies, and worker-pinned network preflight tests for kind/kindnet.
 - A manually dispatched, source-run-bound GHCR publication gate that cannot rebuild, promote, or contact Kubernetes.
 - A manual, pre-publication image-validation path that cannot authorize GHCR publication or promotion.
 - Phase 4 repository contracts for verified public-image publication, reviewed immutable-digest promotion, and manual Argo CD reconciliation.
@@ -27,6 +28,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Replace ineffective pre-DNAT Kubernetes Service allowances with verified post-DNAT API endpoint policies for Argo CD.
 - Resolve application validation from the deployed Helm or Argo image identity instead of the current repository revision.
 - Permit only the Argo CD Redis initialization hook to reach Kubernetes API TCP 443 under default-deny egress.
 - Isolate Trivy cache state from the allowlisted publication-evidence artifact.

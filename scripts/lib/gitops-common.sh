@@ -17,6 +17,45 @@ ARGOCD_ROOT_APPLICATION=platform-environment
 ARGOCD_PROJECT=platform-apps
 ARGOCD_CONFIG=$REPOSITORY_ROOT/platform/addons/argocd
 ARGOCD_ENVIRONMENT=$REPOSITORY_ROOT/environments/local/gitops
+ARGOCD_API_POLICY_TEMPLATE=$ARGOCD_CONFIG/api-endpoint-policies.yaml.tpl
+
+resolve_argocd_api_endpoint() {
+  destination=$1
+  prefix=$2
+  mkdir -p "$destination"
+  kubectl_lab get service kubernetes --namespace default -o json >"$destination/$prefix-service.json"
+  kubectl_lab get endpointslice --namespace default -l kubernetes.io/service-name=kubernetes -o json >"$destination/$prefix-endpoints.json"
+  kubectl_lab get node "$CONTROL_PLANE_CONTAINER" -o json >"$destination/$prefix-node.json"
+  kubectl_lab get pod "kube-apiserver-$CONTROL_PLANE_CONTAINER" --namespace kube-system -o json >"$destination/$prefix-apiserver.json"
+  docker network inspect kind >"$destination/$prefix-network-list.json"
+  python3 - "$destination/$prefix-network-list.json" "$destination/$prefix-network.json" <<'PY'
+import json, sys
+value = json.load(open(sys.argv[1], encoding="utf-8"))
+if not isinstance(value, list) or len(value) != 1:
+    raise SystemExit("FAIL  exactly one kind Docker network is required")
+with open(sys.argv[2], "w", encoding="utf-8") as stream:
+    json.dump(value[0], stream, sort_keys=True, separators=(",", ":"))
+    stream.write("\n")
+PY
+  python3 "$REPOSITORY_ROOT/scripts/resolve-kubernetes-api.py" render \
+    --service "$destination/$prefix-service.json" --endpoints "$destination/$prefix-endpoints.json" \
+    --node "$destination/$prefix-node.json" --apiserver "$destination/$prefix-apiserver.json" \
+    --network "$destination/$prefix-network.json" --template "$ARGOCD_API_POLICY_TEMPLATE" \
+    --context "$EXPECTED_CONTEXT" --cluster "$CLUSTER_NAME" \
+    --identity-output "$destination/$prefix-identity.json" --policy-output "$destination/$prefix-policies.yaml"
+}
+
+compare_argocd_api_snapshots() {
+  python3 "$REPOSITORY_ROOT/scripts/resolve-kubernetes-api.py" compare --expected "$1" --actual "$2"
+}
+
+verify_live_argocd_api_policies() {
+  identity=$1
+  output=$2
+  kubectl_lab get networkpolicy argocd-redis-secret-init-api argocd-application-controller-api \
+    argocd-server-api --namespace "$ARGOCD_NAMESPACE" -o json >"$output"
+  python3 "$REPOSITORY_ROOT/scripts/resolve-kubernetes-api.py" verify-live --identity "$identity" --policies "$output"
+}
 
 verify_argocd_chart() {
   destination=$1

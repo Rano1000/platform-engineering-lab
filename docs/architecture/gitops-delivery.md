@@ -39,6 +39,12 @@ The complete approved child `spec` is serialized as canonical JSON and hashed wi
 
 The Argo API server is ClusterIP-only, has no Gateway route, and has its built-in administrator disabled. Core-mode CLI operations use the operator's existing Kubernetes authentication.
 
+## Controller API boundary
+
+kindnet evaluates cross-node Kubernetes API egress against kube-proxy's translated control-plane endpoint in this lab. Installation therefore discovers one Ready endpoint, verifies it against the control-plane node, Docker network, and kube-apiserver, then renders exact `/32` policies for only the Redis hook, application controller, and API server. Those three consumers are required to run on workers. Repository server, Redis, and unlabelled Pods receive no API access.
+
+Snapshots A, B, and C bind discovery, pre-Helm, and post-Helm state to one canonical SHA-256 identity. Any endpoint or identity change stops the operation without widening or retrying. This is a kind/kindnet-specific response to implementation-dependent Service DNAT behavior, not a portable assumption about all CNIs.
+
 ## Ownership transition
 
 The original Helm release record remains as historical evidence. The Helm guard activates when the live Deployment carries the child Application's annotation-based Argo tracking identity—not merely when the child object exists. Neither Argo Application has a cascading-deletion finalizer, so removing the root leaves the child, and removing the child leaves workload resources. Reversal validates those orphaned resources and explicitly restores guarded Helm ownership without editing the Helm release Secret.

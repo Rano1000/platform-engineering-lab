@@ -64,6 +64,17 @@ def validate_argocd(path: pathlib.Path) -> None:
             for port in container.get("ports") or []:
                 assert not port.get("hostPort")
     assert images == {ARGO_IMAGE, REDIS_IMAGE}, images
+    api_consumers = {
+        "argocd-redis-secret-init",
+        "argocd-application-controller",
+        "argocd-server",
+    }
+    for resource, spec in workloads:
+        labels = resource.get("spec", {}).get("template", {}).get("metadata", {}).get("labels", {})
+        if labels.get("app.kubernetes.io/name") in api_consumers:
+            expressions = spec.get("affinity", {}).get("nodeAffinity", {}).get(
+                "requiredDuringSchedulingIgnoredDuringExecution", {}).get("nodeSelectorTerms", [])[0].get("matchExpressions", [])
+            assert {"key": "node-role.kubernetes.io/control-plane", "operator": "DoesNotExist"} in expressions
     for service in (item for item in rendered if item.get("kind") == "Service"):
         assert service.get("spec", {}).get("type", "ClusterIP") == "ClusterIP"
     forbidden_kinds = {"Ingress", "HTTPRoute", "HorizontalPodAutoscaler", "PersistentVolumeClaim"}
@@ -117,18 +128,7 @@ def validate_projects_and_root() -> None:
 
 def validate_network_policies() -> None:
     policies = documents(ROOT / "platform/addons/argocd/network-policies.yaml")
-    assert len(policies) == 6
-    hook = next(item for item in policies if item["metadata"]["name"] == "argocd-redis-secret-init")
-    assert hook["spec"]["podSelector"]["matchLabels"] == {
-        "app.kubernetes.io/name": "argocd-redis-secret-init",
-        "app.kubernetes.io/component": "redis-secret-init",
-        "app.kubernetes.io/instance": "argocd",
-    }
-    assert hook["spec"]["policyTypes"] == ["Egress"]
-    assert hook["spec"]["egress"] == [{
-        "to": [{"ipBlock": {"cidr": "10.96.0.1/32"}}],
-        "ports": [{"protocol": "TCP", "port": 443}],
-    }]
+    assert len(policies) == 5
     dns = next(item for item in policies if item["metadata"]["name"] == "argocd-dns-egress")
     assert dns["spec"]["podSelector"] == {
         "matchLabels": {"app.kubernetes.io/part-of": "argocd"},
@@ -140,13 +140,23 @@ def validate_network_policies() -> None:
     }
     text = (ROOT / "platform/addons/argocd/network-policies.yaml").read_text(encoding="utf-8")
     assert "platform-apps" not in text
-    assert "port: 443" in text and "port: 6379" in text and "port: 8081" in text
+    assert "10.96.0.1/32" not in text
+    assert "port: 6379" in text and "port: 8081" in text
     assert "0.0.0.0/0" in text
+    template = (ROOT / "platform/addons/argocd/api-endpoint-policies.yaml.tpl").read_text(encoding="utf-8")
+    assert template.count("kind: NetworkPolicy") == 3
+    assert "${API_ENDPOINT_CIDR}" in template and "${API_ENDPOINT_PORT}" in template
+    assert "${ENDPOINT_IDENTITY_SHA256}" in template
+    assert "10.96.0.1" not in template and "0.0.0.0/0" not in template and "endPort:" not in template
     runtime_test = (ROOT / "scripts/test-gitops-network.sh").read_text(encoding="utf-8")
-    assert "confirm_exact argocd-redis-secret-init-network" in runtime_test
-    assert "('10.96.0.1',443)" in runtime_test and "('1.1.1.1',443)" in runtime_test
+    assert "confirm_exact argocd-api-endpoint-network" in runtime_test
+    assert "('1.1.1.1',443)" in runtime_test and "('$listener_ip',6443)" in runtime_test
+    assert "nodeName" in runtime_test and "trap cleanup" in runtime_test
+    assert "argocd-repo-deny" in runtime_test and "argocd-redis-deny" in runtime_test and "argocd-unlabelled-deny" in runtime_test
     assert "automountServiceAccountToken\":false" in runtime_test
-    assert "trap cleanup" in runtime_test
+    installer = (ROOT / "scripts/gitops.sh").read_text(encoding="utf-8")
+    assert installer.index("snapshot-a-policies.yaml") < installer.index("test-gitops-network.sh") < installer.index("helm upgrade")
+    assert all(f"snapshot-{name}" in installer for name in ("a", "b", "c"))
 
 
 def validate_workflow() -> None:

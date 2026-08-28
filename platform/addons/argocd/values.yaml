@@ -26,6 +26,13 @@ configs:
 
 controller:
   replicas: 1
+  affinity: &workerOnlyAffinity
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
   resources:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -76,6 +83,7 @@ repoServer:
 
 server:
   replicas: 1
+  affinity: *workerOnlyAffinity
   service:
     type: ClusterIP
   ingress:
@@ -113,6 +121,7 @@ redis:
       type: RuntimeDefault
 
 redisSecretInit:
+  affinity: *workerOnlyAffinity
   resources:
     requests: {cpu: 25m, memory: 32Mi}
     limits: {cpu: 100m, memory: 64Mi}

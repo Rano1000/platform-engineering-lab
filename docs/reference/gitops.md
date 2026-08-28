@@ -25,7 +25,7 @@ Steady-state requests total approximately 275m CPU and 704Mi memory. Combined li
 - `make gitops-root-sync`: confirm stage 1 and update only the child Application specification.
 - `make gitops-app-status` and `make gitops-app-diff`: read-only workload status and diff.
 - `make gitops-app-sync`: separately confirm stage 2 and update workload resources.
-- `make gitops-network-test`: after installation, confirm one temporary restricted hook-labelled Pod may reach only Kubernetes API TCP 443; the cleanup trap removes it.
+- `make gitops-network-test`: run worker-pinned positive and negative API egress tests; cleanup traps remove every temporary Pod.
 - `make gitops-validate`: read-only runtime security and health validation.
 - `make gitops-uninstall`: guarded removal that refuses while the Application exists.
 - `make app-ownership-status`: report Helm or Argo ownership without mutation.
@@ -40,9 +40,13 @@ Root synchronization checks `origin/main` before confirmation and again immediat
 
 ## Network boundary
 
-Only the repository server receives external TCP 443 egress. Standard NetworkPolicy cannot select GitHub by DNS name, so that Pod alone may reach public HTTPS addresses while private, service, and Pod address ranges are excluded. Other Argo components can reach only DNS, the Kubernetes API, Redis, and required internal Argo services. The Redis secret-initialization hook alone may reach the fixed Kubernetes Service IP `10.96.0.1/32` on TCP 443; it receives no DNS or general HTTPS allowance. Argo has no direct application-Pod flow.
+Only the repository server receives external TCP 443 egress. Standard NetworkPolicy cannot select GitHub by DNS name, so that Pod alone may reach public HTTPS addresses while private, service, and Pod address ranges are excluded. Argo has no direct application-Pod flow.
 
-The Kubernetes API rules use this lab's fixed Service address `10.96.0.1/32`. Enforcement depends on kindnet applying NetworkPolicy before kube-proxy translates the Service address. Successful creation of the Redis Secret proves the required hook-to-API path; the exact hook policy structurally denies other egress. Repository-server HTTPS behavior depends on kindnet and the runtime path used for public address translation. These assumptions require runtime validation after installation and must be updated deliberately if the cluster service or Pod networks change.
+Stable policies deliberately contain no Kubernetes Service ClusterIP allowance. Immediately before installation, the guard requires one Ready API EndpointSlice endpoint and verifies its address and TCP port against the control-plane InternalIP, kind Docker attachment, and kube-apiserver. A template then creates separate exact `/32` policies for the Redis secret-init hook, application controller, and API server. Their full stable label sets are selectors. Repository server, Redis, and unlabelled Pods remain denied from the API.
+
+The canonical endpoint record includes cluster and context, Service and EndpointSlice identities, endpoint address and port, control-plane and kube-apiserver identities, and kind Docker network attachment. Its SHA-256 is recorded on every generated policy. Snapshots A, B, and C must match, and live policies are checked before and after Helm. No missing, multiple, non-Ready, malformed, broad, or changed endpoint is accepted.
+
+This behavior is specific to the observed kind/kindnet post-DNAT enforcement path. It must be regenerated after cluster recreation. Traefik's older ClusterIP rule and control-plane placement remain unchanged pending a separate review.
 
 ## Removal and ownership reversal
 

@@ -15,6 +15,14 @@ pass() { PASS_COUNT=$((PASS_COUNT + 1)); printf 'PASS  %s\n' "$*"; }
 fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); printf 'FAIL  %s\n' "$*"; }
 
 require_lab_runtime
+temporary=$(mktemp -d)
+trap 'rm -rf "$temporary"' EXIT HUP INT TERM
+if resolve_argocd_api_endpoint "$temporary" validation >/dev/null 2>&1 &&
+  verify_live_argocd_api_policies "$temporary/validation-identity.json" "$temporary/live-policies.json" >/dev/null 2>&1; then
+  pass 'generated API policies match the current verified endpoint identity.'
+else
+  fail 'generated API policies do not match the current verified endpoint identity.'
+fi
 if helm --kube-context "$EXPECTED_CONTEXT" status "$ARGOCD_RELEASE" --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then pass 'Argo CD Helm release exists.'; else fail 'Argo CD Helm release is missing.'; fi
 if kubectl_lab get secret argocd-redis --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then
   pass 'Redis initialization reached the Kubernetes API and created its Secret.'
@@ -28,6 +36,15 @@ for workload in deployment/argocd-server deployment/argocd-repo-server statefuls
     fail "$workload is not Ready."
   fi
 done
+control_plane=$(kubectl_lab get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[0].metadata.name}')
+for workload in deployment/argocd-server statefulset/argocd-application-controller; do
+  nodes=$(kubectl_lab get pods --namespace "$ARGOCD_NAMESPACE" -l "app.kubernetes.io/name=$(printf '%s' "$workload" | sed 's|.*/||')" -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}')
+  if [ -n "$nodes" ] && ! printf '%s\n' "$nodes" | grep -Fx "$control_plane" >/dev/null; then
+    pass "$workload runs away from the control plane."
+  else
+    fail "$workload is missing or runs on the control plane."
+  fi
+done
 if [ "$(kubectl_lab get deployment argocd-applicationset-controller --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.spec.replicas}' 2>/dev/null)" = 0 ]; then pass 'ApplicationSet is inactive at zero replicas.'; else fail 'ApplicationSet is unexpectedly active.'; fi
 images=$(kubectl_lab get pods --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{range .items[*].spec.containers[*]}{.image}{"\n"}{end}')
 if [ -n "$images" ] && ! printf '%s\n' "$images" | grep -Ev '@sha256:[0-9a-f]{64}$' >/dev/null; then pass 'all running Argo CD images use complete digests.'; else fail 'a running Argo CD image is not digest-pinned.'; fi
@@ -35,7 +52,11 @@ if kubectl_lab get service --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{range .
 if kubectl_lab get ingress,httproute --namespace "$ARGOCD_NAMESPACE" --ignore-not-found -o name 2>/dev/null | grep . >/dev/null; then fail 'Argo CD has an external route.'; else pass 'Argo CD has no Ingress or HTTPRoute.'; fi
 if kubectl_lab get networkpolicy --namespace "$ARGOCD_NAMESPACE" -o name | grep -F 'argocd-repo-server' >/dev/null; then pass 'repository-server network isolation exists.'; else fail 'repository-server network isolation is missing.'; fi
 for project in platform-bootstrap platform-apps; do
-  if kubectl_lab get appproject "$project" --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then pass "AppProject $project exists."; else fail "AppProject $project is missing."; fi
+  if kubectl_lab get appproject "$project" --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then
+    pass "AppProject $project exists."
+  else
+    pass "AppProject $project is absent; controller-only installation remains unbootstrapped."
+  fi
 done
 for application in "$ARGOCD_ROOT_APPLICATION" "$ARGOCD_APPLICATION"; do
   if kubectl_lab get application "$application" --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then

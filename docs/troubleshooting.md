@@ -72,4 +72,8 @@ Run `make cluster-status`, then inspect `kubectl describe node` and Pods in `kub
 
 Default-deny policies are intentional. DNS is the only initial egress allowance. Add a reviewed NetworkPolicy for each required source, destination, and port; do not remove the default-deny policy as a shortcut.
 
-If `argocd-redis-secret-init` times out while checking its Secret, verify that the repository-owned hook policy selects only that hook and permits `10.96.0.1/32` on TCP 443. This address is the lab's Kubernetes Service IP and assumes kindnet enforces policy before kube-proxy Service translation. Do not add namespace-wide or general HTTPS egress.
+If `argocd-redis-secret-init` times out while checking its Secret, inspect the endpoint identity printed by `make gitops-install`. The generated hook policy must contain the verified control-plane `/32` and actual kube-apiserver TCP port, not the Kubernetes Service ClusterIP. Compare the Service, Ready EndpointSlice, control-plane InternalIP, kind Docker attachment, and kube-apiserver host IP. Do not hard-code the current Docker address, allow a bridge subnet, add general HTTPS, or disable default-deny.
+
+An A/B/C snapshot mismatch means the protected API identity changed during installation. Preserve the state for diagnosis and start a separately approved clean transaction after the endpoint is stable; do not retry automatically. Generated endpoint policies must be regenerated after kind cluster recreation.
+
+A retry intentionally refuses while the obsolete `networkpolicy/argocd-redis-secret-init` from the failed installation remains. Remove it only through a separately approved exact-name cleanup together with the previously recorded hook ServiceAccount, Role, RoleBinding, Job, and Pod residuals. Do not remove baseline resource controls or unrelated NetworkPolicies.

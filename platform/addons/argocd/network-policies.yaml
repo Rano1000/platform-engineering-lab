@@ -29,27 +29,6 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: argocd-redis-secret-init
-  namespace: gitops
-  labels:
-    app.kubernetes.io/managed-by: platform-engineering-lab
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: argocd-redis-secret-init
-      app.kubernetes.io/component: redis-secret-init
-      app.kubernetes.io/instance: argocd
-  policyTypes: [Egress]
-  egress:
-    - to:
-        - ipBlock:
-            cidr: 10.96.0.1/32
-      ports:
-        - {protocol: TCP, port: 443}
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
   name: argocd-controller
   namespace: gitops
   labels:
@@ -60,11 +39,6 @@ spec:
       app.kubernetes.io/name: argocd-application-controller
   policyTypes: [Egress]
   egress:
-    - to:
-        - ipBlock:
-            cidr: 10.96.0.1/32
-      ports:
-        - {protocol: TCP, port: 443}
     - to:
         - podSelector:
             matchLabels:
@@ -148,11 +122,6 @@ spec:
       app.kubernetes.io/name: argocd-server
   policyTypes: [Egress]
   egress:
-    - to:
-        - ipBlock:
-            cidr: 10.96.0.1/32
-      ports:
-        - {protocol: TCP, port: 443}
     - to:
         - podSelector:
             matchLabels:
