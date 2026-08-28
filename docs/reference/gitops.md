@@ -52,6 +52,8 @@ The probe uses only Python standard-library networking from the already deployed
 
 Diagnostics include the structured result, Pod JSON and termination state, description, events, applied policies, EndpointSlice identity, and worker node. Environment variables, credential mounts, Secret fields, tokens, and private-key patterns are sanitized or rejected before entering the ignored artifact directory.
 
+Diagnostic helpers execute in POSIX subshells and use namespaced state. A path guard requires the unique run root and every Pod destination to remain beneath `.artifacts/gitops-network`, rejecting traversal, symlinks, special files, and file-as-directory collisions before writing.
+
 ## Removal and ownership reversal
 
 Neither Application includes a resource finalizer and pruning is disabled:

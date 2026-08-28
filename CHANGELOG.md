@@ -28,6 +28,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Isolate POSIX shell diagnostic helper state and reject artifact path traversal, symlinks, and file-directory collisions.
 - Split ambiguous GitOps network checks into bounded single-assertion Pods with structured, sanitized pre-cleanup diagnostics.
 - Replace ineffective pre-DNAT Kubernetes Service allowances with verified post-DNAT API endpoint policies for Argo CD.
 - Resolve application validation from the deployed Helm or Argo image identity instead of the current repository revision.

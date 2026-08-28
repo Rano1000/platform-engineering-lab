@@ -157,6 +157,8 @@ def validate_network_policies() -> None:
     assert "INNER_TIMEOUT_SECONDS=2" in runtime_test and "OUTER_TIMEOUT_SECONDS=20" in runtime_test
     probe = (ROOT / "scripts/network-probe.py").read_text(encoding="utf-8")
     assert "automountServiceAccountToken" in probe and '"http_authorization_response"' in probe
+    assert "validate-diagnostic-path.py" in runtime_test and "gnt_case_" in runtime_test
+    assert "sanitize_file() (" in runtime_test and "cleanup_resources() (" in runtime_test
     installer = (ROOT / "scripts/gitops.sh").read_text(encoding="utf-8")
     assert installer.index("snapshot-a-policies.yaml") < installer.index("test-gitops-network.sh") < installer.index("helm upgrade")
     assert all(f"snapshot-{name}" in installer for name in ("a", "b", "c"))

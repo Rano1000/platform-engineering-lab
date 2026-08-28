@@ -15,7 +15,8 @@ require_lab_runtime
 require_app_release
 temporary=$(mktemp -d)
 suffix="$(date +%s)-$$"
-diagnostics=${GITOPS_NETWORK_DIAGNOSTICS:-$REPOSITORY_ROOT/.artifacts/gitops-network/$suffix}
+gnt_artifact_base=$REPOSITORY_ROOT/.artifacts/gitops-network
+diagnostics=${GITOPS_NETWORK_DIAGNOSTICS:-$gnt_artifact_base/$suffix}
 listener="argocd-api-negative-$suffix"
 listener_policy=$listener
 created_pods=''
@@ -23,80 +24,100 @@ diagnostic_pods=''
 diagnostics_complete=0
 identity=''
 worker=''
-mkdir -p "$diagnostics/pods"
+python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-dir --base "$gnt_artifact_base" --root "$diagnostics" --path "$diagnostics/pods"
 
-sanitize_file() {
-  source=$1 destination=$2
-  python3 "$SCRIPT_DIR/redact-network-diagnostics.py" --sanitize "$source" "$destination"
-}
+sanitize_file() (
+  gnt_sanitize_source=$1
+  gnt_sanitize_output=$2
+  python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-output --base "$gnt_artifact_base" --root "$diagnostics" --path "$gnt_sanitize_output"
+  python3 "$SCRIPT_DIR/redact-network-diagnostics.py" --sanitize "$gnt_sanitize_source" "$gnt_sanitize_output"
+)
 
-capture_pod() {
-  pod=$1
-  destination=$diagnostics/pods/$pod
-  mkdir -p "$destination"
-  if kubectl_lab get pod "$pod" --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then
-    kubectl_lab get pod "$pod" --namespace "$ARGOCD_NAMESPACE" -o json >"$temporary/pod.json"
-    kubectl_lab logs "$pod" --namespace "$ARGOCD_NAMESPACE" >"$temporary/pod.log" 2>&1 || true
-    kubectl_lab describe pod "$pod" --namespace "$ARGOCD_NAMESPACE" >"$temporary/describe.txt" 2>&1 || true
-    kubectl_lab get events --namespace "$ARGOCD_NAMESPACE" --field-selector "involvedObject.name=$pod" -o json >"$temporary/events.json"
-    sanitize_file "$temporary/pod.json" "$destination/pod.json"
-    sanitize_file "$temporary/pod.log" "$destination/pod.log"
-    sanitize_file "$temporary/describe.txt" "$destination/describe.txt"
-    sanitize_file "$temporary/events.json" "$destination/events.json"
+capture_pod() (
+  gnt_capture_pod=$1
+  gnt_capture_raw=$temporary/pod-raw/$gnt_capture_pod
+  mkdir -p "$gnt_capture_raw"
+  if kubectl_lab get pod "$gnt_capture_pod" --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then
+    kubectl_lab logs "$gnt_capture_pod" --namespace "$ARGOCD_NAMESPACE" >"$gnt_capture_raw/pod.log" 2>&1 || true
+    kubectl_lab get pod "$gnt_capture_pod" --namespace "$ARGOCD_NAMESPACE" -o json >"$gnt_capture_raw/pod.json"
+    kubectl_lab describe pod "$gnt_capture_pod" --namespace "$ARGOCD_NAMESPACE" >"$gnt_capture_raw/describe.txt" 2>&1 || true
+    kubectl_lab get events --namespace "$ARGOCD_NAMESPACE" --field-selector "involvedObject.name=$gnt_capture_pod" -o json >"$gnt_capture_raw/events.json"
   fi
-}
+)
 
-capture_diagnostics() {
+sanitize_pod() (
+  gnt_sanitize_pod=$1
+  gnt_sanitize_raw=$temporary/pod-raw/$gnt_sanitize_pod
+  gnt_sanitize_destination=$diagnostics/pods/$gnt_sanitize_pod
+  [ -d "$gnt_sanitize_raw" ] || return 0
+  python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-dir --base "$gnt_artifact_base" --root "$diagnostics" --path "$gnt_sanitize_destination"
+  for gnt_sanitize_name in pod.log pod.json describe.txt events.json; do
+    [ -f "$gnt_sanitize_raw/$gnt_sanitize_name" ] || continue
+    sanitize_file "$gnt_sanitize_raw/$gnt_sanitize_name" "$gnt_sanitize_destination/$gnt_sanitize_name"
+  done
+)
+
+capture_diagnostics() (
+  gnt_capture_endpoint=$diagnostics/endpoint-identity.json
+  gnt_capture_endpointslices=$diagnostics/endpointslices.json
+  gnt_capture_node=$diagnostics/node.json
+  gnt_capture_policies=$diagnostics/networkpolicies.yaml
   [ -n "$identity" ] && [ -n "$worker" ] || return 1
-  sanitize_file "$identity" "$diagnostics/endpoint-identity.json"
+  # shellcheck disable=SC2086 # Internal Pod names are stored as a whitespace-delimited list.
+  for gnt_capture_name in $created_pods; do capture_pod "$gnt_capture_name"; done
+  capture_pod "$listener"
+  kubectl_lab get networkpolicy --namespace "$ARGOCD_NAMESPACE" -o yaml >"$temporary/networkpolicies.yaml"
+  cp "$identity" "$temporary/endpoint-identity.json"
   kubectl_lab get endpointslice --namespace default -l kubernetes.io/service-name=kubernetes -o json >"$temporary/endpointslices.json"
   kubectl_lab get node "$worker" -o json >"$temporary/node.json"
-  kubectl_lab get networkpolicy --namespace "$ARGOCD_NAMESPACE" -o yaml >"$temporary/networkpolicies.yaml"
-  sanitize_file "$temporary/endpointslices.json" "$diagnostics/endpointslices.json"
-  sanitize_file "$temporary/node.json" "$diagnostics/node.json"
-  sanitize_file "$temporary/networkpolicies.yaml" "$diagnostics/networkpolicies.yaml"
   # shellcheck disable=SC2086 # Internal Pod names are stored as a whitespace-delimited list.
-  for pod in $created_pods; do capture_pod "$pod"; done
-  capture_pod "$listener"
-}
+  for gnt_capture_name in $created_pods; do sanitize_pod "$gnt_capture_name"; done
+  sanitize_pod "$listener"
+  sanitize_file "$temporary/endpoint-identity.json" "$gnt_capture_endpoint"
+  sanitize_file "$temporary/endpointslices.json" "$gnt_capture_endpointslices"
+  sanitize_file "$temporary/node.json" "$gnt_capture_node"
+  sanitize_file "$temporary/networkpolicies.yaml" "$gnt_capture_policies"
+)
 
-validate_diagnostics() {
-  for required in endpoint-identity.json endpointslices.json node.json networkpolicies.yaml; do
-    [ -s "$diagnostics/$required" ] || return 1
+validate_diagnostics() (
+  for gnt_validate_required in endpoint-identity.json endpointslices.json node.json networkpolicies.yaml; do
+    [ -s "$diagnostics/$gnt_validate_required" ] || return 1
   done
   # shellcheck disable=SC2086 # Internal Pod names are stored as a whitespace-delimited list.
-  for pod in $diagnostic_pods; do
-    for required in pod.json pod.log describe.txt events.json; do
-      [ -s "$diagnostics/pods/$pod/$required" ] || return 1
+  for gnt_validate_pod in $diagnostic_pods; do
+    for gnt_validate_required in pod.json pod.log describe.txt events.json; do
+      [ -s "$diagnostics/pods/$gnt_validate_pod/$gnt_validate_required" ] || return 1
     done
   done
   # The probe Pods contain no environment variables or credential mounts. Reject rather than redact any credential-bearing evidence.
+  if find "$diagnostics" -type l -print -quit | grep . >/dev/null; then return 1; fi
+  if find "$diagnostics" ! -type d ! -type f -print -quit | grep . >/dev/null; then return 1; fi
   find "$diagnostics" -type f -print0 | xargs -0 python3 "$SCRIPT_DIR/redact-network-diagnostics.py"
-}
+)
 
-cleanup_resources() {
+cleanup_resources() (
   # shellcheck disable=SC2086 # Internal Pod names are stored as a whitespace-delimited list.
-  for pod in $created_pods; do
-    kubectl_lab delete pod "$pod" --namespace "$ARGOCD_NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  for gnt_cleanup_pod in $created_pods; do
+    kubectl_lab delete pod "$gnt_cleanup_pod" --namespace "$ARGOCD_NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   done
   kubectl_lab delete networkpolicy "$listener_policy" --namespace "$ARGOCD_NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
   kubectl_lab delete pod "$listener" --namespace "$ARGOCD_NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-}
+)
 
 finish() {
-  status=$?
+  gnt_finish_status=$?
   set +e
   capture_diagnostics
   if validate_diagnostics; then
     diagnostics_complete=1
   else
     printf 'FAIL  diagnostics are incomplete or contain credential-bearing data; temporary resources were preserved.\n' >&2
-    status=1
+    gnt_finish_status=1
   fi
   if [ "$diagnostics_complete" = 1 ]; then cleanup_resources; fi
   rm -rf "$temporary"
   printf 'Network diagnostics: %s\n' "$diagnostics"
-  exit "$status"
+  exit "$gnt_finish_status"
 }
 trap finish EXIT
 trap 'exit 129' HUP
@@ -154,9 +175,10 @@ spec:
 EOF
 kubectl_lab apply -f "$temporary/listener-policy.yaml"
 
-validate_result() {
-  log=$1 status_file=$2 expected_name=$3 expected_identity=$4 expected_node=$5 expected_host=$6 expected_port=$7 expected_result=$8
-  python3 - "$log" "$status_file" "$expected_name" "$expected_identity" "$expected_node" "$expected_host" "$expected_port" "$expected_result" <<'PY'
+validate_result() (
+  gnt_result_log=$1 gnt_result_status=$2 gnt_result_name=$3 gnt_result_identity=$4
+  gnt_result_node=$5 gnt_result_host=$6 gnt_result_port=$7 gnt_result_expected=$8
+  python3 - "$gnt_result_log" "$gnt_result_status" "$gnt_result_name" "$gnt_result_identity" "$gnt_result_node" "$gnt_result_host" "$gnt_result_port" "$gnt_result_expected" <<'PY'
 import json, sys
 path, status_path, name, identity, node, host, port, expected = sys.argv[1:]
 lines = [line for line in open(path, encoding="utf-8") if line.strip()]
@@ -172,25 +194,26 @@ if terminated.get("exitCode") != value["exit_code"]: raise SystemExit("container
 if value["exit_code"] != 0: raise SystemExit("probe assertion failed: " + json.dumps(value, sort_keys=True))
 if value["duration_seconds"] >= 20: raise SystemExit("inner timeout did not complete before outer timeout")
 PY
-}
+)
 
 run_case() {
-  name=$1 identity_name=$2 labels=$3 host=$4 port=$5 expected=$6 mode=$7
-  pod="$name-$suffix"
-  created_pods=$pod
-  diagnostic_pods="$diagnostic_pods $pod"
-  overrides=$(python3 "$SCRIPT_DIR/network-probe.py" pod-overrides --node "$worker" --image "$image" --test-name "$name" --identity "$identity_name" --host "$host" --port "$port" --expected "$expected" --mode "$mode" --timeout "$INNER_TIMEOUT_SECONDS")
-  kubectl_lab run "$pod" --namespace "$ARGOCD_NAMESPACE" --restart=Never --image="$image" --labels="$labels" --overrides="$overrides"
-  elapsed=0 phase=''
-  while [ "$elapsed" -lt "$OUTER_TIMEOUT_SECONDS" ]; do
-    phase=$(kubectl_lab get pod "$pod" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || true)
-    case $phase in Succeeded|Failed) break ;; esac
-    sleep 1; elapsed=$((elapsed + 1))
+  gnt_case_name=$1 gnt_case_identity=$2 gnt_case_labels=$3 gnt_case_host=$4
+  gnt_case_port=$5 gnt_case_expected=$6 gnt_case_mode=$7
+  gnt_case_pod="$gnt_case_name-$suffix"
+  created_pods=$gnt_case_pod
+  diagnostic_pods="$diagnostic_pods $gnt_case_pod"
+  gnt_case_overrides=$(python3 "$SCRIPT_DIR/network-probe.py" pod-overrides --node "$worker" --image "$image" --test-name "$gnt_case_name" --identity "$gnt_case_identity" --host "$gnt_case_host" --port "$gnt_case_port" --expected "$gnt_case_expected" --mode "$gnt_case_mode" --timeout "$INNER_TIMEOUT_SECONDS")
+  kubectl_lab run "$gnt_case_pod" --namespace "$ARGOCD_NAMESPACE" --restart=Never --image="$image" --labels="$gnt_case_labels" --overrides="$gnt_case_overrides"
+  gnt_case_elapsed=0 gnt_case_phase=''
+  while [ "$gnt_case_elapsed" -lt "$OUTER_TIMEOUT_SECONDS" ]; do
+    gnt_case_phase=$(kubectl_lab get pod "$gnt_case_pod" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+    case $gnt_case_phase in Succeeded|Failed) break ;; esac
+    sleep 1; gnt_case_elapsed=$((gnt_case_elapsed + 1))
   done
-  capture_pod "$pod"
-  [ "$phase" = Succeeded ] || return 1
-  validate_result "$diagnostics/pods/$pod/pod.log" "$diagnostics/pods/$pod/pod.json" "$name" "$identity_name" "$worker" "$host" "$port" "$expected"
-  kubectl_lab delete pod "$pod" --namespace "$ARGOCD_NAMESPACE" --wait=true >/dev/null
+  capture_diagnostics
+  [ "$gnt_case_phase" = Succeeded ] || return 1
+  validate_result "$diagnostics/pods/$gnt_case_pod/pod.log" "$diagnostics/pods/$gnt_case_pod/pod.json" "$gnt_case_name" "$gnt_case_identity" "$worker" "$gnt_case_host" "$gnt_case_port" "$gnt_case_expected"
+  kubectl_lab delete pod "$gnt_case_pod" --namespace "$ARGOCD_NAMESPACE" --wait=true >/dev/null
   created_pods=''
 }
 
