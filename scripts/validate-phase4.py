@@ -181,6 +181,10 @@ def validate_network_policies() -> None:
     }
     assert '"*"' not in json.dumps(default_project)
     assert "harden_default_project" in installer and "--server-side" in installer
+    hardening = installer[installer.index("harden_default_project()") : installer.index("harden_default_project_guarded()")]
+    assert hardening.count("--force-conflicts") == 2
+    assert "--dry-run=server" in hardening and "validate-dry-run" in hardening
+    assert "--force-conflicts" not in installer.replace(hardening, "")
     assert "check-optional-argo-application.py" in (ROOT / "scripts/validate-gitops.sh").read_text(encoding="utf-8")
 
 

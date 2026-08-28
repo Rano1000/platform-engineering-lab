@@ -51,9 +51,10 @@ if [ -n "$images" ] && ! printf '%s\n' "$images" | grep -Ev '@sha256:[0-9a-f]{64
 if kubectl_lab get service --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{range .items[*]}{.spec.type}{"\n"}{end}' | grep -Ev '^ClusterIP$' >/dev/null; then fail 'Argo CD exposes a non-ClusterIP Service.'; else pass 'Argo CD Services are internal ClusterIP only.'; fi
 if kubectl_lab get ingress,httproute --namespace "$ARGOCD_NAMESPACE" --ignore-not-found -o name 2>/dev/null | grep . >/dev/null; then fail 'Argo CD has an external route.'; else pass 'Argo CD has no Ingress or HTTPRoute.'; fi
 if kubectl_lab get networkpolicy --namespace "$ARGOCD_NAMESPACE" -o name | grep -F 'argocd-repo-server' >/dev/null; then pass 'repository-server network isolation exists.'; else fail 'repository-server network isolation is missing.'; fi
-if kubectl_lab get appproject default --namespace "$ARGOCD_NAMESPACE" -o json >"$temporary/default-project.json" 2>"$temporary/default-project.err"; then
-  default_checksum=$(python3 "$SCRIPT_DIR/validate-default-appproject.py" \
-    --expected "$ARGOCD_DEFAULT_PROJECT" --live "$temporary/default-project.json" 2>"$temporary/default-project-validation.err" || true)
+if kubectl_lab get appproject default --namespace "$ARGOCD_NAMESPACE" --show-managed-fields=true \
+  -o json >"$temporary/default-project.json" 2>"$temporary/default-project.err"; then
+  default_checksum=$(python3 "$SCRIPT_DIR/validate-default-appproject.py" validate-live \
+    --desired "$ARGOCD_DEFAULT_PROJECT" --live "$temporary/default-project.json" 2>"$temporary/default-project-validation.err" || true)
   if [ "$default_checksum" = "$ARGOCD_DEFAULT_PROJECT_SHA256" ]; then
     pass "default AppProject is repository-owned and deny-all ($default_checksum)."
   else

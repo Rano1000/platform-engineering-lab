@@ -25,12 +25,24 @@ def main():
     assert not re.search(r"(?:while|until).*helm upgrade", installer)
     assert "retry" not in helm.lower()
     hardening = installer[installer.index("harden_default_project()") : installer.index("harden_default_project_guarded()")]
-    assert "--server-side" in hardening and "--field-manager=platform-engineering-lab" in hardening
+    assert hardening.count("--force-conflicts") == 2
+    assert hardening.count('-f "$ARGOCD_DEFAULT_PROJECT"') == 2
+    assert "--dry-run=server" in hardening
+    assert '--field-manager="$ARGOCD_DEFAULT_PROJECT_FIELD_MANAGER"' in hardening
+    assert "applications.argoproj.io --all-namespaces" in hardening
+    assert "verify-unchanged" in hardening and "validate-dry-run" in hardening and "validate-post" in hardening
+    assert "sleep \"$ARGOCD_DEFAULT_PROJECT_STABILIZATION_SECONDS\"" in hardening
+    executable_force_uses = [
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "scripts").rglob("*.sh")
+        if "--force-conflicts" in path.read_text(encoding="utf-8")
+    ]
+    assert executable_force_uses == ["scripts/gitops.sh"]
     assert "validate-default-appproject.py" in hardening and "ARGOCD_DEFAULT_PROJECT_SHA256" in hardening
     assert installer.index("harden_default_project\n") < installer.index('resolve_argocd_api_endpoint "$temporary" snapshot-c')
-    assert "confirm_exact argocd-default-project-deny-all" in installer
+    assert 'confirm_exact "$gitops_project_confirmation"' in hardening
     subprocess.run(["python3", str(ROOT / "scripts/capture-gitops-install-failure.py"), "--self-test"], check=True)
-    subprocess.run(["python3", str(ROOT / "scripts/validate-default-appproject.py"), "--self-test"], check=True)
+    subprocess.run(["python3", str(ROOT / "scripts/validate-default-appproject.py"), "self-test"], check=True)
     subprocess.run(["python3", str(ROOT / "scripts/check-optional-argo-application.py"), "--self-test"], check=True)
     print("PASS  Argo installation uses one atomic, waited, non-retried Helm execution with a fixed 15-minute timeout and failure diagnostics.")
 

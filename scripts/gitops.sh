@@ -16,23 +16,65 @@ verify_chart() {
 harden_default_project() (
   gitops_project_tmp=$(mktemp -d)
   trap 'rm -rf "$gitops_project_tmp"' EXIT HUP INT TERM
-  kubectl_lab get appproject default --namespace "$ARGOCD_NAMESPACE" -o json >"$gitops_project_tmp/live-before.json"
-  python3 "$SCRIPT_DIR/validate-default-appproject.py" --preflight --live "$gitops_project_tmp/live-before.json"
-  kubectl_lab apply --server-side --field-manager=platform-engineering-lab -f "$ARGOCD_DEFAULT_PROJECT"
-  kubectl_lab get appproject default --namespace "$ARGOCD_NAMESPACE" -o json >"$gitops_project_tmp/live-after.json"
-  gitops_project_checksum=$(python3 "$SCRIPT_DIR/validate-default-appproject.py" \
-    --expected "$ARGOCD_DEFAULT_PROJECT" --live "$gitops_project_tmp/live-after.json")
+  gitops_project_validator=$SCRIPT_DIR/validate-default-appproject.py
+  kubectl_lab get appproject default --namespace "$ARGOCD_NAMESPACE" --show-managed-fields=true \
+    -o json >"$gitops_project_tmp/live-a.json"
+  kubectl_lab get applications.argoproj.io --all-namespaces -o json >"$gitops_project_tmp/applications-a.json"
+  python3 "$gitops_project_validator" preflight --desired "$ARGOCD_DEFAULT_PROJECT" \
+    --live "$gitops_project_tmp/live-a.json" --applications "$gitops_project_tmp/applications-a.json" \
+    --output "$gitops_project_tmp/record.json"
+  gitops_project_state=$(python3 "$gitops_project_validator" field --record "$gitops_project_tmp/record.json" --name state)
+  if [ "$gitops_project_state" = hardened ]; then
+    gitops_project_checksum=$(python3 "$gitops_project_validator" validate-live \
+      --desired "$ARGOCD_DEFAULT_PROJECT" --live "$gitops_project_tmp/live-a.json")
+    printf 'PASS  default AppProject is already repository-owned and deny-all (%s); no transfer was forced.\n' \
+      "$gitops_project_checksum"
+    exit 0
+  fi
+  kubectl_lab apply --server-side --force-conflicts --dry-run=server \
+    --field-manager="$ARGOCD_DEFAULT_PROJECT_FIELD_MANAGER" -f "$ARGOCD_DEFAULT_PROJECT" -o json \
+    >"$gitops_project_tmp/dry-run.json"
+  python3 "$gitops_project_validator" validate-dry-run --record "$gitops_project_tmp/record.json" \
+    --live "$gitops_project_tmp/live-a.json" --dry-run "$gitops_project_tmp/dry-run.json" \
+    --desired "$ARGOCD_DEFAULT_PROJECT"
+  kubectl_lab get appproject default --namespace "$ARGOCD_NAMESPACE" --show-managed-fields=true \
+    -o json >"$gitops_project_tmp/live-b.json"
+  kubectl_lab get applications.argoproj.io --all-namespaces -o json >"$gitops_project_tmp/applications-b.json"
+  python3 "$gitops_project_validator" verify-unchanged --record "$gitops_project_tmp/record.json" \
+    --live "$gitops_project_tmp/live-b.json" --applications "$gitops_project_tmp/applications-b.json"
+  gitops_project_confirmation=$(python3 "$gitops_project_validator" confirmation \
+    --record "$gitops_project_tmp/record.json")
+  confirm_exact "$gitops_project_confirmation" \
+    "Transfer only the reviewed fields of gitops/AppProject default from argocd-server to $ARGOCD_DEFAULT_PROJECT_FIELD_MANAGER."
+  kubectl_lab get appproject default --namespace "$ARGOCD_NAMESPACE" --show-managed-fields=true \
+    -o json >"$gitops_project_tmp/live-c.json"
+  kubectl_lab get applications.argoproj.io --all-namespaces -o json >"$gitops_project_tmp/applications-c.json"
+  python3 "$gitops_project_validator" verify-unchanged --record "$gitops_project_tmp/record.json" \
+    --live "$gitops_project_tmp/live-c.json" --applications "$gitops_project_tmp/applications-c.json"
+  kubectl_lab apply --server-side --force-conflicts --field-manager="$ARGOCD_DEFAULT_PROJECT_FIELD_MANAGER" \
+    -f "$ARGOCD_DEFAULT_PROJECT"
+  kubectl_lab get appproject default --namespace "$ARGOCD_NAMESPACE" --show-managed-fields=true \
+    -o json >"$gitops_project_tmp/live-after.json"
+  gitops_project_checksum=$(python3 "$gitops_project_validator" validate-post \
+    --record "$gitops_project_tmp/record.json" --desired "$ARGOCD_DEFAULT_PROJECT" \
+    --live "$gitops_project_tmp/live-after.json")
   [ "$gitops_project_checksum" = "$ARGOCD_DEFAULT_PROJECT_SHA256" ] ||
     die "Default AppProject checksum mismatch: $gitops_project_checksum."
-  printf 'PASS  default AppProject is repository-owned and deny-all (%s).\n' "$gitops_project_checksum"
+  sleep "$ARGOCD_DEFAULT_PROJECT_STABILIZATION_SECONDS"
+  kubectl_lab get appproject default --namespace "$ARGOCD_NAMESPACE" --show-managed-fields=true \
+    -o json >"$gitops_project_tmp/live-stable.json"
+  gitops_project_stable_checksum=$(python3 "$gitops_project_validator" validate-post --stabilized \
+    --record "$gitops_project_tmp/record.json" --desired "$ARGOCD_DEFAULT_PROJECT" \
+    --live "$gitops_project_tmp/live-stable.json")
+  [ "$gitops_project_stable_checksum" = "$gitops_project_checksum" ] ||
+    die 'Default AppProject changed during bounded stabilization.'
+  printf 'PASS  default AppProject ownership transfer is stable and deny-all (%s).\n' "$gitops_project_checksum"
 )
 
 harden_default_project_guarded() {
   require_lab_runtime
   helm --kube-context "$EXPECTED_CONTEXT" status "$ARGOCD_RELEASE" --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1 ||
     die "Argo CD release '$ARGOCD_RELEASE' is not installed."
-  confirm_exact argocd-default-project-deny-all \
-    "Replace only gitops/AppProject default with the repository-owned deny-all specification."
   harden_default_project
 }
 
