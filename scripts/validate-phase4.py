@@ -117,11 +117,36 @@ def validate_projects_and_root() -> None:
 
 def validate_network_policies() -> None:
     policies = documents(ROOT / "platform/addons/argocd/network-policies.yaml")
-    assert len(policies) == 5
+    assert len(policies) == 6
+    hook = next(item for item in policies if item["metadata"]["name"] == "argocd-redis-secret-init")
+    assert hook["spec"]["podSelector"]["matchLabels"] == {
+        "app.kubernetes.io/name": "argocd-redis-secret-init",
+        "app.kubernetes.io/component": "redis-secret-init",
+        "app.kubernetes.io/instance": "argocd",
+    }
+    assert hook["spec"]["policyTypes"] == ["Egress"]
+    assert hook["spec"]["egress"] == [{
+        "to": [{"ipBlock": {"cidr": "10.96.0.1/32"}}],
+        "ports": [{"protocol": "TCP", "port": 443}],
+    }]
+    dns = next(item for item in policies if item["metadata"]["name"] == "argocd-dns-egress")
+    assert dns["spec"]["podSelector"] == {
+        "matchLabels": {"app.kubernetes.io/part-of": "argocd"},
+        "matchExpressions": [{
+            "key": "app.kubernetes.io/name",
+            "operator": "NotIn",
+            "values": ["argocd-redis-secret-init"],
+        }],
+    }
     text = (ROOT / "platform/addons/argocd/network-policies.yaml").read_text(encoding="utf-8")
     assert "platform-apps" not in text
     assert "port: 443" in text and "port: 6379" in text and "port: 8081" in text
     assert "0.0.0.0/0" in text
+    runtime_test = (ROOT / "scripts/test-gitops-network.sh").read_text(encoding="utf-8")
+    assert "confirm_exact argocd-redis-secret-init-network" in runtime_test
+    assert "('10.96.0.1',443)" in runtime_test and "('1.1.1.1',443)" in runtime_test
+    assert "automountServiceAccountToken\":false" in runtime_test
+    assert "trap cleanup" in runtime_test
 
 
 def validate_workflow() -> None:

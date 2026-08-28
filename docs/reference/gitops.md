@@ -25,6 +25,7 @@ Steady-state requests total approximately 275m CPU and 704Mi memory. Combined li
 - `make gitops-root-sync`: confirm stage 1 and update only the child Application specification.
 - `make gitops-app-status` and `make gitops-app-diff`: read-only workload status and diff.
 - `make gitops-app-sync`: separately confirm stage 2 and update workload resources.
+- `make gitops-network-test`: after installation, confirm one temporary restricted hook-labelled Pod may reach only Kubernetes API TCP 443; the cleanup trap removes it.
 - `make gitops-validate`: read-only runtime security and health validation.
 - `make gitops-uninstall`: guarded removal that refuses while the Application exists.
 - `make app-ownership-status`: report Helm or Argo ownership without mutation.
@@ -39,9 +40,9 @@ Root synchronization checks `origin/main` before confirmation and again immediat
 
 ## Network boundary
 
-Only the repository server receives external TCP 443 egress. Standard NetworkPolicy cannot select GitHub by DNS name, so that Pod alone may reach public HTTPS addresses while private, service, and Pod address ranges are excluded. Other Argo components can reach only DNS, the Kubernetes API, Redis, and required internal Argo services. Argo has no direct application-Pod flow.
+Only the repository server receives external TCP 443 egress. Standard NetworkPolicy cannot select GitHub by DNS name, so that Pod alone may reach public HTTPS addresses while private, service, and Pod address ranges are excluded. Other Argo components can reach only DNS, the Kubernetes API, Redis, and required internal Argo services. The Redis secret-initialization hook alone may reach the fixed Kubernetes Service IP `10.96.0.1/32` on TCP 443; it receives no DNS or general HTTPS allowance. Argo has no direct application-Pod flow.
 
-The Kubernetes API rule uses this lab's fixed Service address `10.96.0.1/32`. Repository-server HTTPS behavior depends on kindnet and the runtime path used for public address translation. Both assumptions require validation after installation and must be updated deliberately if the cluster service or Pod networks change.
+The Kubernetes API rules use this lab's fixed Service address `10.96.0.1/32`. Enforcement depends on kindnet applying NetworkPolicy before kube-proxy translates the Service address. Successful creation of the Redis Secret proves the required hook-to-API path; the exact hook policy structurally denies other egress. Repository-server HTTPS behavior depends on kindnet and the runtime path used for public address translation. These assumptions require runtime validation after installation and must be updated deliberately if the cluster service or Pod networks change.
 
 ## Removal and ownership reversal
 

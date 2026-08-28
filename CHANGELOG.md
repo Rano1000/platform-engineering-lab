@@ -27,6 +27,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Permit only the Argo CD Redis initialization hook to reach Kubernetes API TCP 443 under default-deny egress.
 - Isolate Trivy cache state from the allowlisted publication-evidence artifact.
 - Refresh Python dependencies and use the fixed Bookworm base after the supply-chain gate identified fixable HIGH vulnerabilities.
 - Validate scalar EndpointSlice readiness, use authorized in-cluster clients, and secure temporary network-test Pods.

@@ -71,3 +71,5 @@ Run `make cluster-status`, then inspect `kubectl describe node` and Pods in `kub
 ## Networked workloads cannot connect
 
 Default-deny policies are intentional. DNS is the only initial egress allowance. Add a reviewed NetworkPolicy for each required source, destination, and port; do not remove the default-deny policy as a shortcut.
+
+If `argocd-redis-secret-init` times out while checking its Secret, verify that the repository-owned hook policy selects only that hook and permits `10.96.0.1/32` on TCP 443. This address is the lab's Kubernetes Service IP and assumes kindnet enforces policy before kube-proxy Service translation. Do not add namespace-wide or general HTTPS egress.

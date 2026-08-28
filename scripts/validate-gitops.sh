@@ -16,6 +16,11 @@ fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); printf 'FAIL  %s\n' "$*"; }
 
 require_lab_runtime
 if helm --kube-context "$EXPECTED_CONTEXT" status "$ARGOCD_RELEASE" --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then pass 'Argo CD Helm release exists.'; else fail 'Argo CD Helm release is missing.'; fi
+if kubectl_lab get secret argocd-redis --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then
+  pass 'Redis initialization reached the Kubernetes API and created its Secret.'
+else
+  fail 'Redis initialization Secret is missing; verify hook access to Kubernetes API TCP 443.'
+fi
 for workload in deployment/argocd-server deployment/argocd-repo-server statefulset/argocd-application-controller deployment/argocd-redis; do
   if kubectl_lab rollout status "$workload" --namespace "$ARGOCD_NAMESPACE" --timeout=30s >/dev/null 2>&1; then
     pass "$workload is Ready."
