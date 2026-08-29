@@ -137,20 +137,24 @@ run_argocd_core() {
 run_guarded_argocd_diff() (
   diff_mode=$1
   diff_expected=$2
-  diff_directory=$3
-  shift 3
+  diff_expected_checksum=$3
+  diff_directory=$4
+  shift 4
   diff_stdout=$diff_directory/argocd-$diff_mode-diff.stdout
   diff_stderr=$diff_directory/argocd-$diff_mode-diff.stderr
+  diff_nonce=$(printf '%s' "$diff_directory" | cksum | awk '{print $1}')
+  diff_evidence=$REPOSITORY_ROOT/.artifacts/gitops-diff/$(date +%s)-$$-$diff_nonce-$diff_mode
   diff_exit=0
   run_argocd_core "$@" --diff-exit-code 20 >"$diff_stdout" 2>"$diff_stderr" || diff_exit=$?
   if [ "$diff_mode" = root ]; then
     diff_validation_status=0
     python3 "$ARGOCD_DIFF_VALIDATOR" --mode "$diff_mode" --exit-code "$diff_exit" \
-      --stdout "$diff_stdout" --stderr "$diff_stderr" --expected "$diff_expected" || diff_validation_status=$?
+      --stdout "$diff_stdout" --stderr "$diff_stderr" --expected "$diff_expected" \
+      --expected-checksum "$diff_expected_checksum" --evidence-dir "$diff_evidence" || diff_validation_status=$?
   else
     diff_validation_status=0
     python3 "$ARGOCD_DIFF_VALIDATOR" --mode "$diff_mode" --exit-code "$diff_exit" \
-      --stdout "$diff_stdout" --stderr "$diff_stderr" || diff_validation_status=$?
+      --stdout "$diff_stdout" --stderr "$diff_stderr" --evidence-dir "$diff_evidence" || diff_validation_status=$?
   fi
   if [ "$diff_validation_status" -ne 0 ]; then
     exit "$diff_validation_status"

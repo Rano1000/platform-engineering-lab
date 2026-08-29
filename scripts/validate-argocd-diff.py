@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
-"""Validate the bounded resource changes emitted by Argo CD app diff."""
+"""Validate Argo CD diffs and retain deterministic, sanitized evidence."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
+import os
 import pathlib
 import re
 import sys
 import tempfile
+from typing import Any
 
 import yaml
 
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+EVIDENCE_ROOT = ROOT / ".artifacts/gitops-diff"
 DIFF_EXIT_CODE = 20
 HEADER = re.compile(r"^===== (?P<kind>\S+) (?P<identity>\S+) ======$")
-COMMAND = re.compile(r"^(?P<left>\d+(?:,\d+)?)(?P<operation>[acd])(?P<right>\d+(?:,\d+)?)$")
+COMMAND = re.compile(r"^\d+(?:,\d+)?(?P<operation>[acd])\d+(?:,\d+)?$")
+SAFE_EVIDENCE_NAME = re.compile(r"^[0-9]+-[0-9]+-[0-9]+-(?:root|child)$")
 ROOT_IDENTITY = ("argoproj.io/Application", "gitops/golden-path-api")
 CHILD_IDENTITIES = {
     ("apps/Deployment", "platform-apps/golden-path-golden-path-api"),
@@ -25,34 +32,163 @@ CHILD_IDENTITIES = {
     ("/Service", "platform-apps/golden-path-golden-path-api"),
     ("/ServiceAccount", "platform-apps/golden-path-golden-path-api"),
 }
-REDACTIONS = (
+SENSITIVE_KEY = re.compile(r"(?i)(?:token|password|secret|client-key|private-key|authorization)")
+TEXT_REDACTIONS = (
     (re.compile(r"(?i)(authorization:\s*(?:bearer\s+)?)[^\s]+"), r"\1[REDACTED]"),
-    (re.compile(r"(?i)((?:token|password|client-key-data)\s*[=:]\s*)[^\s]+"), r"\1[REDACTED]"),
+    (re.compile(r"(?i)((?:token|password|client-key-data|private-key-data)\s*[=:]\s*)[^\s]+"), r"\1[REDACTED]"),
 )
+DEFAULTED_POINTERS = {
+    "/spec/source/helm/passCredentials", "/spec/source/helm/skipCrds",
+    "/spec/source/helm/ignoreMissingValueFiles", "/spec/destination/name",
+}
+MISSING = object()
 
 
 class DiffValidationError(RuntimeError):
-    pass
+    def __init__(self, message: str, exit_code: int = 1):
+        super().__init__(message)
+        self.exit_code = exit_code
 
 
-def sanitize(value: str) -> str:
-    sanitized = value
-    for pattern, replacement in REDACTIONS:
-        sanitized = pattern.sub(replacement, sanitized)
-    return sanitized[:8000]
+def sanitize_text(value: str, limit: int | None = None) -> str:
+    result = value
+    for pattern, replacement in TEXT_REDACTIONS:
+        result = pattern.sub(replacement, result)
+    return result if limit is None else result[:limit]
+
+
+def redact_value(value: Any, key: str = "") -> Any:
+    if SENSITIVE_KEY.search(key):
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {item: redact_value(child, item) for item, child in sorted(value.items())}
+    if isinstance(value, list):
+        return [redact_value(child) for child in value]
+    return sanitize_text(value) if isinstance(value, str) else value
+
+
+def canonical(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: canonical(value[key]) for key in sorted(value)}
+    if isinstance(value, list):
+        return [canonical(item) for item in value]
+    return value
+
+
+def pointer(parent: str, item: str | int) -> str:
+    token = str(item).replace("~", "~0").replace("/", "~1")
+    return f"{parent}/{token}"
+
+
+def empty_representation(value: Any) -> bool:
+    return value is None or value == "" or value == [] or value == {}
+
+
+def difference_classification(path: str, expected: Any, proposed: Any, state: str) -> str:
+    if state in ("missing", "additional"):
+        present = proposed if expected is MISSING else expected
+        if empty_representation(present):
+            return "representation_difference"
+    if state == "additional" and (path == "/metadata" or path.startswith("/metadata/")):
+        return "metadata_added_by_argo"
+    if state == "additional" and path in DEFAULTED_POINTERS:
+        return "kubernetes_or_argo_defaulted"
+    return "genuine_desired_specification_change"
+
+
+def make_difference(path: str, expected: Any, proposed: Any, state: str) -> dict[str, Any]:
+    return {
+        "path": path, "state": state,
+        "classification": difference_classification(path, expected, proposed, state),
+        "expected": "[MISSING]" if expected is MISSING else redact_value(expected),
+        "proposed": "[MISSING]" if proposed is MISSING else redact_value(proposed),
+    }
+
+
+def compare(expected: Any, proposed: Any, path: str = "") -> list[dict[str, Any]]:
+    differences: list[dict[str, Any]] = []
+    if isinstance(expected, dict) and isinstance(proposed, dict):
+        for key in sorted(set(expected) | set(proposed)):
+            child = pointer(path, key)
+            if key not in expected:
+                differences.append(make_difference(child, MISSING, proposed[key], "additional"))
+            elif key not in proposed:
+                differences.append(make_difference(child, expected[key], MISSING, "missing"))
+            else:
+                differences.extend(compare(expected[key], proposed[key], child))
+        return differences
+    if isinstance(expected, list) and isinstance(proposed, list):
+        for index in range(max(len(expected), len(proposed))):
+            child = pointer(path, index)
+            if index >= len(expected):
+                differences.append(make_difference(child, MISSING, proposed[index], "additional"))
+            elif index >= len(proposed):
+                differences.append(make_difference(child, expected[index], MISSING, "missing"))
+            else:
+                differences.extend(compare(expected[index], proposed[index], child))
+        return differences
+    if type(expected) is not type(proposed) or expected != proposed:
+        differences.append(make_difference(path or "/", expected, proposed, "changed"))
+    return differences
+
+
+def atomic_write(path: pathlib.Path, content: bytes) -> None:
+    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content); stream.flush(); os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+class Evidence:
+    def __init__(self, destination: pathlib.Path):
+        if destination.parent != EVIDENCE_ROOT or not SAFE_EVIDENCE_NAME.fullmatch(destination.name):
+            raise DiffValidationError("diff evidence destination is outside the unique ignored evidence root")
+        EVIDENCE_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if EVIDENCE_ROOT.is_symlink() or not EVIDENCE_ROOT.is_dir():
+            raise DiffValidationError("diff evidence root is not a safe directory")
+        os.mkdir(destination, mode=0o700)
+        if destination.is_symlink() or not destination.is_dir():
+            raise DiffValidationError("diff evidence run path is not a safe directory")
+        self.destination, self.files, self.completed = destination, [], False
+
+    def write_text(self, name: str, value: str) -> None:
+        self.write_bytes(name, value.encode("utf-8"))
+
+    def write_json(self, name: str, value: Any) -> None:
+        self.write_text(name, json.dumps(redact_value(canonical(value)), sort_keys=True, separators=(",", ":")) + "\n")
+
+    def write_bytes(self, name: str, value: bytes) -> None:
+        if pathlib.PurePath(name).name != name or not re.fullmatch(r"[a-z0-9.-]+", name):
+            raise DiffValidationError("unsafe evidence filename")
+        path = self.destination / name
+        atomic_write(path, value)
+        if path.is_symlink() or not path.is_file() or not os.access(path, os.R_OK):
+            raise DiffValidationError(f"evidence file is unsafe or unreadable: {name}")
+        self.files.append(name)
+
+    def complete(self, status: int, outcome: str) -> None:
+        checksums = {name: hashlib.sha256((self.destination / name).read_bytes()).hexdigest() for name in sorted(self.files)}
+        self.write_json("evidence-manifest.json", {"schemaVersion": 1, "outcome": outcome, "argoExitCode": status, "files": checksums})
+        required = set(checksums) | {"evidence-manifest.json"}
+        entries = list(self.destination.iterdir())
+        if {item.name for item in entries} != required or any(item.is_symlink() or not item.is_file() for item in entries):
+            raise DiffValidationError("diff diagnostic evidence is incomplete or contains unsafe entries")
+        self.completed = True
 
 
 def split_sections(output: str) -> list[tuple[tuple[str, str], list[str]]]:
-    sections: list[tuple[tuple[str, str], list[str]]] = []
-    current: tuple[str, str] | None = None
-    body: list[str] = []
+    sections, body, current = [], [], None
     for line in output.splitlines():
         match = HEADER.fullmatch(line)
         if match:
             if current is not None:
                 sections.append((current, body))
-            current = (match.group("kind"), match.group("identity"))
-            body = []
+            current, body = (match.group("kind"), match.group("identity")), []
         elif current is None:
             if line.strip():
                 raise DiffValidationError("unexpected output appeared before the first resource header")
@@ -68,43 +204,39 @@ def split_sections(output: str) -> list[tuple[tuple[str, str], list[str]]]:
 
 
 def classify(body: list[str]) -> str:
-    operations: list[str] = []
-    payload = False
+    operations, payload = [], False
     for line in body:
         match = COMMAND.fullmatch(line)
-        if match:
-            operations.append(match.group("operation"))
-        elif line.startswith(("> ", "< ")):
-            payload = True
-        elif line in ("---", "\\ No newline at end of file") or not line:
-            continue
-        else:
-            raise DiffValidationError(f"unrecognized diff line: {line!r}")
+        if match: operations.append(match.group("operation"))
+        elif line.startswith(("> ", "< ")): payload = True
+        elif line in ("---", "\\ No newline at end of file") or not line: continue
+        else: raise DiffValidationError(f"unrecognized diff line: {line!r}")
     if not operations or not payload:
         raise DiffValidationError("resource section has no complete diff hunk")
     unique = set(operations)
-    if unique == {"a"} and not any(line.startswith("< ") for line in body):
-        return "creation"
-    if unique == {"d"} and not any(line.startswith("> ") for line in body):
-        return "deletion"
-    if "c" in unique or unique == {"a", "d"}:
-        return "modification"
+    if unique == {"a"} and not any(line.startswith("< ") for line in body): return "creation"
+    if unique == {"d"} and not any(line.startswith("> ") for line in body): return "deletion"
+    if "c" in unique or unique == {"a", "d"}: return "modification"
     raise DiffValidationError("resource section has ambiguous change semantics")
 
 
-def validate_root(sections: list[tuple[tuple[str, str], list[str]]], expected: pathlib.Path) -> None:
+def protected_checksum(application: dict[str, Any]) -> str:
+    specification = application.get("spec")
+    if not isinstance(specification, dict):
+        raise DiffValidationError("approved child Application has no complete specification")
+    return hashlib.sha256(json.dumps(canonical(specification), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def parse_root(sections: list[tuple[tuple[str, str], list[str]]]) -> dict[str, Any]:
     if len(sections) != 1 or sections[0][0] != ROOT_IDENTITY:
         raise DiffValidationError("root diff must create exactly Application/gitops/golden-path-api")
     if classify(sections[0][1]) != "creation":
         raise DiffValidationError("root diff must be a creation, never a modification or deletion")
     rendered = "\n".join(line[2:] for line in sections[0][1] if line.startswith("> ")) + "\n"
-    try:
-        proposed = yaml.safe_load(rendered)
-        approved = yaml.safe_load(expected.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as error:
-        raise DiffValidationError(f"unable to parse the complete proposed Application: {error}") from error
-    if proposed != approved:
-        raise DiffValidationError("proposed child Application does not match the approved immutable manifest")
+    try: proposed = yaml.safe_load(rendered)
+    except yaml.YAMLError as error: raise DiffValidationError(f"unable to parse the complete proposed Application: {error}") from error
+    if not isinstance(proposed, dict): raise DiffValidationError("parsed proposed Application is not an object")
+    return proposed
 
 
 def validate_child(sections: list[tuple[tuple[str, str], list[str]]]) -> None:
@@ -115,91 +247,125 @@ def validate_child(sections: list[tuple[tuple[str, str], list[str]]]) -> None:
             raise DiffValidationError(f"child diff proposes an unapproved deletion: {identity[0]} {identity[1]}")
 
 
-def validate(mode: str, status: int, stdout: str, stderr: str, expected: pathlib.Path | None) -> None:
+def validate(mode: str, status: int, stdout: str, stderr: str, expected_path: pathlib.Path | None,
+             expected_checksum: str | None, evidence: Evidence) -> None:
+    evidence.write_text("argocd-diff.txt", sanitize_text(stdout))
+    evidence.write_text("argocd-stderr.txt", sanitize_text(stderr))
+    evidence.write_json("command-result.json", {"argoExitCode": status, "mode": mode})
     if status == 0:
+        evidence.complete(status, "no_diff")
         raise DiffValidationError("Argo reported no differences; there is no guarded change to approve")
     if status != DIFF_EXIT_CODE:
-        detail = sanitize(stderr.strip() or stdout.strip() or "no diagnostic output")
-        raise DiffValidationError(f"Argo operational failure (exit {status}): {detail}")
+        evidence.complete(status, "operational_failure")
+        detail = sanitize_text(stderr.strip() or stdout.strip() or "no diagnostic output", 8000)
+        raise DiffValidationError(f"Argo operational failure (exit {status}): {detail}", status)
     if stderr.strip():
-        raise DiffValidationError(f"Argo diff returned unexpected diagnostics: {sanitize(stderr.strip())}")
+        evidence.complete(status, "unexpected_stderr")
+        raise DiffValidationError(f"Argo diff returned unexpected diagnostics: {sanitize_text(stderr.strip(), 8000)}")
     sections = split_sections(stdout)
-    if mode == "root":
-        if expected is None:
-            raise DiffValidationError("root diff validation requires the approved child manifest")
-        validate_root(sections, expected)
-    else:
+    if mode == "child":
         validate_child(sections)
+        evidence.write_json("resource-sections.json", [{"kind": item[0][0], "identity": item[0][1]} for item in sections])
+        evidence.complete(status, "approved_diff"); return
+    if expected_path is None or expected_checksum is None or not re.fullmatch(r"[0-9a-f]{64}", expected_checksum):
+        raise DiffValidationError("root diff requires the complete protected child specification checksum")
+    try: approved = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error: raise DiffValidationError(f"unable to parse the approved Application: {error}") from error
+    if not isinstance(approved, dict) or protected_checksum(approved) != expected_checksum:
+        raise DiffValidationError("approved child specification checksum does not match the protected checksum")
+    proposed = parse_root(sections)
+    approved, proposed = canonical(approved), canonical(proposed)
+    differences = compare(approved, proposed)
+    evidence.write_json("approved-application.json", approved)
+    evidence.write_json("proposed-application.json", proposed)
+    evidence.write_json("differences.json", differences)
+    evidence.complete(status, "mismatch" if differences else "approved_diff")
+    if differences:
+        lines = ["proposed child Application differs from the approved immutable manifest:"]
+        for item in differences:
+            lines.append(f"{item['path']}: {item['state']} ({item['classification']}); expected={json.dumps(item['expected'], sort_keys=True)}; proposed={json.dumps(item['proposed'], sort_keys=True)}")
+        raise DiffValidationError("\n".join(lines))
 
 
 def fixture(identity: tuple[str, str], operation: str, content: str = "kind: ConfigMap") -> str:
-    lines = content.splitlines()
+    lines = content.splitlines(); prefix = "<" if operation == "d" else ">"
     command = {"a": f"0a1,{len(lines)}", "c": "1c1", "d": f"1,{len(lines)}d0"}[operation]
-    prefix = "<" if operation == "d" else ">"
-    payload = "\n".join(f"{prefix} {line}" for line in lines)
-    return f"\n===== {identity[0]} {identity[1]} ======\n{command}\n{payload}\n"
+    return f"\n===== {identity[0]} {identity[1]} ======\n{command}\n" + "\n".join(f"{prefix} {line}" for line in lines) + "\n"
 
 
-def expect_failure(action, label: str) -> None:
-    try:
-        action()
-    except DiffValidationError:
-        return
+def expect_failure(action, label: str) -> DiffValidationError:
+    try: action()
+    except DiffValidationError as error: return error
     raise AssertionError(f"{label} was accepted")
 
 
 def self_test() -> None:
-    approved = {
-        "apiVersion": "argoproj.io/v1alpha1",
-        "kind": "Application",
-        "metadata": {"name": "golden-path-api", "namespace": "gitops"},
-    }
+    expected = {"apiVersion": "argoproj.io/v1alpha1", "kind": "Application", "metadata": {"name": "golden-path-api", "namespace": "gitops"}, "spec": {"project": "platform-apps", "syncPolicy": {"syncOptions": ["CreateNamespace=false"]}}}
+    nested = compare({"a": {"b": [None, "", {}]}}, {"a": {"b": [None, [], {"c": 1}]}})
+    assert [item["path"] for item in nested] == ["/a/b/1", "/a/b/2/c"]
+    assert compare({"empty": []}, {})[0]["classification"] == "representation_difference"
+    assert compare({}, {"metadata": {"uid": "x"}})[0]["classification"] == "metadata_added_by_argo"
+    assert make_difference("/spec/source/helm/skipCrds", MISSING, False, "additional")["classification"] == "kubernetes_or_argo_defaulted"
+    visible_digest = "sha256:" + "2" * 64
+    redacted = redact_value({"digest": visible_digest, "revision": "1" * 40, "token": "private"})
+    assert redacted == {"digest": visible_digest, "revision": "1" * 40, "token": "[REDACTED]"}
+    protected = {"spec": {"project": "platform-apps", "source": {"targetRevision": "1" * 40, "helm": {"valuesObject": {"image": {"digest": "sha256:" + "2" * 64}}}}, "syncPolicy": {"syncOptions": ["CreateNamespace=false"]}}}
+    for path, mutation in (
+        ("/spec/source/helm/valuesObject/image/digest", lambda value: value["spec"]["source"]["helm"]["valuesObject"]["image"].update(digest="sha256:" + "9" * 64)),
+        ("/spec/source/targetRevision", lambda value: value["spec"]["source"].update(targetRevision="9" * 40)),
+        ("/spec/project", lambda value: value["spec"].update(project="other")),
+        ("/spec/syncPolicy/syncOptions/0", lambda value: value["spec"]["syncPolicy"].update(syncOptions=["Other=false"])),
+        ("/spec/syncPolicy/automated", lambda value: value["spec"]["syncPolicy"].update(automated={"prune": True})),
+    ):
+        proposed = json.loads(json.dumps(protected)); mutation(proposed)
+        result = compare(protected, proposed)
+        assert any(item["path"] == path and item["classification"] == "genuine_desired_specification_change" for item in result)
     with tempfile.TemporaryDirectory(prefix="argocd-diff-self-test-") as temporary:
-        expected = pathlib.Path(temporary) / "approved.yaml"
-        expected.write_text(yaml.safe_dump(approved, sort_keys=False), encoding="utf-8")
-        output = fixture(ROOT_IDENTITY, "a", yaml.safe_dump(approved, sort_keys=False).rstrip())
-        validate("root", DIFF_EXIT_CODE, output, "", expected)
-        expect_failure(lambda: validate("root", 0, "", "", expected), "empty diff")
-        expect_failure(lambda: validate("root", DIFF_EXIT_CODE, fixture(("/ConfigMap", "gitops/other"), "a"), "", expected), "unexpected creation")
-        expect_failure(lambda: validate("root", DIFF_EXIT_CODE, fixture(ROOT_IDENTITY, "c"), "", expected), "modification")
-        expect_failure(lambda: validate("root", DIFF_EXIT_CODE, fixture(ROOT_IDENTITY, "d"), "", expected), "deletion")
-        expect_failure(lambda: validate("root", DIFF_EXIT_CODE, output + fixture(("/ConfigMap", "gitops/other"), "a"), "", expected), "multiple resources")
-        expect_failure(lambda: validate("root", 2, "", "authentication failed", expected), "operational failure")
-        expect_failure(lambda: validate("root", DIFF_EXIT_CODE, "ambiguous", "", expected), "ambiguous output")
-    child = next(iter(CHILD_IDENTITIES))
-    validate("child", DIFF_EXIT_CODE, fixture(child, "c"), "", None)
-    expect_failure(lambda: validate("child", DIFF_EXIT_CODE, fixture(child, "d"), "", None), "child deletion")
-    print("PASS  Argo diff validation separates expected changes from empty, unsafe, ambiguous, and operational outcomes.")
+        global EVIDENCE_ROOT
+        original_root, EVIDENCE_ROOT = EVIDENCE_ROOT, pathlib.Path(temporary) / "evidence"
+        approved_path = pathlib.Path(temporary) / "approved.yaml"
+        approved_path.write_text(yaml.safe_dump(expected, sort_keys=False), encoding="utf-8")
+        checksum = protected_checksum(expected)
+        output = fixture(ROOT_IDENTITY, "a", yaml.safe_dump(expected, sort_keys=False).rstrip())
+        validate("root", 20, output, "", approved_path, checksum, Evidence(EVIDENCE_ROOT / "1-1-1-root"))
+        changed = json.loads(json.dumps(expected)); changed["spec"]["project"] = "other"
+        error = expect_failure(lambda: validate("root", 20, fixture(ROOT_IDENTITY, "a", yaml.safe_dump(changed).rstrip()), "", approved_path, checksum, Evidence(EVIDENCE_ROOT / "2-1-1-root")), "changed project")
+        assert "/spec/project" in str(error)
+        operational = expect_failure(lambda: validate("root", 2, "", "authorization: Bearer private", approved_path, checksum, Evidence(EVIDENCE_ROOT / "3-1-1-root")), "operational failure")
+        assert operational.exit_code == 2 and "private" not in str(operational)
+        expect_failure(lambda: Evidence(EVIDENCE_ROOT / "../unsafe"), "unsafe evidence traversal")
+        incomplete = Evidence(EVIDENCE_ROOT / "4-1-1-root")
+        incomplete.write_text("argocd-diff.txt", "safe")
+        (incomplete.destination / "unexpected").mkdir()
+        expect_failure(lambda: incomplete.complete(20, "approved_diff"), "incomplete or unsafe evidence")
+        EVIDENCE_ROOT = original_root
+    print("PASS  Argo diff diagnostics canonicalize nested state, classify every mismatch, redact secrets, and retain atomic evidence.")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--self-test", action="store_true")
-    parser.add_argument("--mode", choices=("root", "child"))
-    parser.add_argument("--exit-code", type=int)
-    parser.add_argument("--stdout", type=pathlib.Path)
-    parser.add_argument("--stderr", type=pathlib.Path)
-    parser.add_argument("--expected", type=pathlib.Path)
+    parser.add_argument("--self-test", action="store_true"); parser.add_argument("--mode", choices=("root", "child"))
+    parser.add_argument("--exit-code", type=int); parser.add_argument("--stdout", type=pathlib.Path); parser.add_argument("--stderr", type=pathlib.Path)
+    parser.add_argument("--expected", type=pathlib.Path); parser.add_argument("--expected-checksum"); parser.add_argument("--evidence-dir", type=pathlib.Path)
     args = parser.parse_args()
+    evidence = None
     try:
-        if args.self_test:
-            self_test()
-            return 0
-        if args.mode is None or args.exit_code is None or args.stdout is None or args.stderr is None:
-            raise DiffValidationError("mode, exit-code, stdout, and stderr are required")
-        validate(
-            args.mode,
-            args.exit_code,
-            args.stdout.read_text(encoding="utf-8"),
-            args.stderr.read_text(encoding="utf-8"),
-            args.expected,
-        )
-        print(f"PASS  guarded {args.mode} diff contains only the approved resource changes.")
-        return 0
-    except (DiffValidationError, OSError, UnicodeError) as error:
+        if args.self_test: self_test(); return 0
+        if None in (args.mode, args.exit_code, args.stdout, args.stderr, args.evidence_dir): raise DiffValidationError("mode, exit-code, stdout, stderr, and evidence-dir are required")
+        evidence = Evidence(args.evidence_dir)
+        validate(args.mode, args.exit_code, args.stdout.read_text(encoding="utf-8"), args.stderr.read_text(encoding="utf-8"), args.expected, args.expected_checksum, evidence)
+        print(f"PASS  guarded {args.mode} diff contains only the approved resource changes.\nEvidence: {args.evidence_dir}"); return 0
+    except (DiffValidationError, OSError, UnicodeError, json.JSONDecodeError) as error:
+        if evidence is not None and not evidence.completed:
+            try:
+                evidence.write_json("validation-error.json", {"error": sanitize_text(str(error), 8000)})
+                evidence.complete(args.exit_code if args.exit_code is not None else 1, "validation_failure")
+            except (DiffValidationError, OSError) as evidence_error:
+                print(f"FAIL  diagnostic evidence could not be completed atomically: {evidence_error}", file=sys.stderr)
+        code = error.exit_code if isinstance(error, DiffValidationError) else 1
         print(f"FAIL  {error}", file=sys.stderr)
-        return 1
+        if args.evidence_dir: print(f"Evidence: {args.evidence_dir}", file=sys.stderr)
+        return code
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+if __name__ == "__main__": raise SystemExit(main())

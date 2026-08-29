@@ -176,7 +176,7 @@ root_diff() {
   trap 'rm -rf "$temporary"' EXIT HUP INT TERM
   prepare_environment_revision "$temporary"
   printf 'Environment revision: %s\nChild specification SHA-256: %s\n' "$environment_revision" "$child_spec_checksum"
-  run_guarded_argocd_diff root "$application" "$temporary" \
+  run_guarded_argocd_diff root "$application" "$child_spec_checksum" "$temporary" \
     app diff "$ARGOCD_ROOT_APPLICATION" --revision "$environment_revision"
 }
 
@@ -196,7 +196,7 @@ root_sync() {
   fi
   printf '%s\n' 'Stage 1 changes only the child Application specification in gitops. It does not synchronize or prune workload resources.'
   printf 'Environment revision: %s\nChild specification SHA-256: %s\n' "$environment_revision" "$child_spec_checksum"
-  run_guarded_argocd_diff root "$application" "$temporary" \
+  run_guarded_argocd_diff root "$application" "$child_spec_checksum" "$temporary" \
     app diff "$ARGOCD_ROOT_APPLICATION" --revision "$environment_revision"
   require_environment_revision_current "$environment_revision"
   confirmation=$EXPECTED_CONTEXT/$ARGOCD_ROOT_APPLICATION/$environment_revision/$chart_revision/$image_revision/$digest/sha256:$child_spec_checksum
@@ -220,7 +220,7 @@ app_diff() {
   require_argocd_application
   temporary=$(mktemp -d)
   trap 'rm -rf "$temporary"' EXIT HUP INT TERM
-  run_guarded_argocd_diff child '' "$temporary" app diff "$ARGOCD_APPLICATION"
+  run_guarded_argocd_diff child '' '' "$temporary" app diff "$ARGOCD_APPLICATION"
 }
 
 app_sync() {
@@ -245,7 +245,7 @@ app_sync() {
   printf '%s\n' 'Stage 2 changes only resources owned by the child Application. Pruning remains disabled.'
   temporary=$(mktemp -d)
   trap 'rm -rf "$temporary"' EXIT HUP INT TERM
-  run_guarded_argocd_diff child '' "$temporary" app diff "$ARGOCD_APPLICATION"
+  run_guarded_argocd_diff child '' '' "$temporary" app diff "$ARGOCD_APPLICATION"
   confirmation=$EXPECTED_CONTEXT/$ARGOCD_APPLICATION/$chart_revision/$image_revision/$digest
   confirm_exact "$confirmation" "Synchronize only child Application '$ARGOCD_APPLICATION'."
   run_argocd_core app sync "$ARGOCD_APPLICATION" --revision "$chart_revision" --prune=false

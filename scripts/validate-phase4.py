@@ -297,14 +297,14 @@ def validate_ownership_guards() -> None:
     root_sync = gitops[gitops.index("root_sync()") : gitops.index("app_status()")]
     root_diff = gitops[gitops.index("root_diff()") : gitops.index("root_sync()")]
     app_sync = gitops[gitops.index("app_sync()") : gitops.index("uninstall_gitops()")]
-    assert 'run_guarded_argocd_diff root "$application" "$temporary"' in root_sync
+    assert 'run_guarded_argocd_diff root "$application" "$child_spec_checksum" "$temporary"' in root_sync
     assert 'app diff "$ARGOCD_ROOT_APPLICATION" --revision "$environment_revision"' in root_sync
     assert 'run_argocd_core app sync "$ARGOCD_ROOT_APPLICATION" --revision "$environment_revision" --prune=false' in root_sync
     assert "child_spec_checksum" in root_sync and "require_environment_revision_current" in root_sync
     assert root_sync.count("require_environment_revision_current") == 2
     assert "/sha256:$child_spec_checksum" in root_sync
     assert "--revision main" not in root_sync
-    assert 'run_guarded_argocd_diff root "$application" "$temporary"' in root_diff
+    assert 'run_guarded_argocd_diff root "$application" "$child_spec_checksum" "$temporary"' in root_diff
     assert 'app diff "$ARGOCD_ROOT_APPLICATION" --revision "$environment_revision"' in root_diff
     assert "child_spec_checksum" in root_diff
     assert f'run_argocd_core app sync "$ARGOCD_APPLICATION" --revision "$chart_revision" --prune=false' in app_sync
@@ -345,6 +345,10 @@ def validate_ownership_guards() -> None:
     assert 'ROOT_IDENTITY = ("argoproj.io/Application", "gitops/golden-path-api")' in diff_validator
     assert "Argo operational failure (exit {status})" in diff_validator
     assert "child diff proposes an unapproved deletion" in diff_validator
+    assert 'EVIDENCE_ROOT = ROOT / ".artifacts/gitops-diff"' in diff_validator
+    assert "metadata_added_by_argo" in diff_validator and "kubernetes_or_argo_defaulted" in diff_validator
+    assert "protected_checksum(approved) != expected_checksum" in diff_validator
+    assert 'evidence.write_json("differences.json", differences)' in diff_validator
     assert 'run_argocd_core "$@" --diff-exit-code 20' in common
 
 
