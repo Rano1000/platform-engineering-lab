@@ -22,6 +22,7 @@ configs:
     admin.enabled: false
     application.resourceTrackingMethod: annotation
     exec.enabled: false
+    resource.respectRBAC: normal
     statusbadge.enabled: false
 
 controller:

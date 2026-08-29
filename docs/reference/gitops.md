@@ -16,6 +16,8 @@
 
 Both dedicated projects set `clusterResourceWhitelist: []`. `platform-bootstrap` permits only namespaced `argoproj.io/Application` resources in `gitops`; `platform-apps` permits only the seven reviewed workload kinds in `platform-apps`. Validation rejects wildcard repositories, destinations, namespaces, API groups, and kinds, as well as any removed or additional namespaced kind.
 
+The controller cache uses `resource.respectRBAC: normal`. Its ClusterRole is a closed list: approved workload kinds retain their existing management verbs; Pods, namespaces, ReplicaSets, and EndpointSlices receive only `get`, `list`, and `watch`; Events additionally require `create` and `patch`. Unrelated APIs—including admission webhooks and Secrets—receive no access. `strict` mode is not used because it requires creating `SelfSubjectAccessReview` objects.
+
 Canonical bootstrap-object SHA-256 checksums are `c8aeeac80903c974d4777b3924fb90a031fc9d71d7c29db917313332f0d4a481` for `platform-bootstrap`, `b09cdc47dab5fd2586597e21d4850163df937ead281905936efa9ef714cf487e` for `platform-apps`, and `6d70580cd848fd52a08476c8ecb98ea28e1f877a4bb18fd681ff7f82cad2a989` for `platform-environment`. Phase 4 validation recalculates all three from canonical JSON.
 
 Steady-state requests total approximately 275m CPU and 704Mi memory. Combined limits are approximately 1.35 CPU and 1.4Gi memory. Redis and repository caches use disposable `emptyDir`; no PVC is created.

@@ -88,6 +88,13 @@ def validate_argocd(path: pathlib.Path) -> None:
             assert "*" not in rule.get("apiGroups", []), f"wildcard API group in {role['metadata']['name']}"
             assert "*" not in rule.get("resources", []), f"wildcard resource in {role['metadata']['name']}"
             assert "*" not in rule.get("verbs", []), f"wildcard verb in {role['metadata']['name']}"
+    controller_role = next(item for item in rendered if item.get("kind") == "ClusterRole" and
+                           item.get("metadata", {}).get("name") == "argocd-application-controller")
+    values = yaml.safe_load((ROOT / "platform/addons/argocd/values.yaml").read_text(encoding="utf-8"))
+    assert controller_role["rules"] == values["controller"]["clusterRoleRules"]["rules"]
+    config = next(item for item in rendered if item.get("kind") == "ConfigMap" and
+                  item.get("metadata", {}).get("name") == "argocd-cm")
+    assert config["data"]["resource.respectRBAC"] == "normal"
 
 
 def validate_projects_and_root() -> None:
