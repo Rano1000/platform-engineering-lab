@@ -68,6 +68,26 @@ def validate_kubeconfig_document(document: dict) -> None:
         raise CoreBindingError("isolated kubeconfig credentials are not the expected kind client certificate pair")
 
 
+def argocd_client_document() -> dict:
+    return {
+        "current-context": EXPECTED_CONTEXT,
+        "contexts": [
+            {
+                "name": EXPECTED_CONTEXT,
+                "server": EXPECTED_CONTEXT,
+                "user": EXPECTED_CONTEXT,
+            }
+        ],
+        "servers": [{"server": EXPECTED_CONTEXT, "core": True}],
+        "users": [{"name": EXPECTED_CONTEXT}],
+    }
+
+
+def validate_argocd_client_document(document: dict) -> None:
+    if document != argocd_client_document():
+        raise CoreBindingError("isolated Argo CD client config must contain only the exact credential-free core context")
+
+
 def restrictive_file(path: pathlib.Path, content: bytes = b""):
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     stream = os.fdopen(descriptor, "wb")
@@ -115,7 +135,10 @@ def prepare_isolated_kubeconfig(kubectl: str, directory: pathlib.Path) -> tuple[
     if stat.S_IMODE(kubeconfig.stat().st_mode) != 0o600:
         raise CoreBindingError("isolated kubeconfig permissions must be 0600")
     client_config = directory / "argocd-config"
-    with restrictive_file(client_config, b"{}\n") as stream:
+    client_document = argocd_client_document()
+    validate_argocd_client_document(client_document)
+    content = (json.dumps(client_document, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    with restrictive_file(client_config, content) as stream:
         stream.close()
     return kubeconfig, client_config
 
@@ -180,6 +203,24 @@ def self_test() -> None:
     changed_context = json.loads(json.dumps(valid))
     changed_context["current-context"] = "other"
     expect_failure(lambda: validate_kubeconfig_document(changed_context), "altered context")
+    client_document = argocd_client_document()
+    validate_argocd_client_document(client_document)
+    for label, changed_client in (
+        ("empty Argo client config", {}),
+        ("default argocd context", {**client_document, "current-context": "argocd"}),
+        (
+            "non-core Argo server",
+            {**client_document, "servers": [{"server": EXPECTED_CONTEXT, "core": False}]},
+        ),
+        (
+            "external Argo server",
+            {**client_document, "servers": [{"server": "external.example", "core": True}]},
+        ),
+    ):
+        expect_failure(
+            lambda value=changed_client: validate_argocd_client_document(value),
+            label,
+        )
     path = pathlib.Path("/tmp/path with spaces/argocd")
     kubeconfig = pathlib.Path("/tmp/path with spaces/core kubeconfig")
     config = pathlib.Path("/tmp/path with spaces/argocd config")
