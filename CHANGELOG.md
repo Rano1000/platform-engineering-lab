@@ -29,6 +29,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Distinguish expected Argo CD diffs from operational failures and accept them only after bounded semantic resource validation.
 - Bind every guarded Argo CD core-mode diff and synchronization command to `gitops` through an isolated validated kubeconfig and credential-free core client context.
 - Enable Argo CD's RBAC-aware cache so unrelated API denials do not require broader controller visibility.
 - Express both dedicated AppProjects' cluster-resource denial as an empty allowlist and test their exact namespaced permissions.

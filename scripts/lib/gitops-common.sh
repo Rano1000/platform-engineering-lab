@@ -25,6 +25,7 @@ ARGOCD_ENVIRONMENT=$REPOSITORY_ROOT/environments/local/gitops
 ARGOCD_API_POLICY_TEMPLATE=$ARGOCD_CONFIG/api-endpoint-policies.yaml.tpl
 ARGOCD_CLI_INSTALLER=$REPOSITORY_ROOT/scripts/argocd-cli.py
 ARGOCD_CORE_RUNNER=$REPOSITORY_ROOT/scripts/argocd-core.py
+ARGOCD_DIFF_VALIDATOR=$REPOSITORY_ROOT/scripts/validate-argocd-diff.py
 
 resolve_argocd_api_endpoint() {
   destination=$1
@@ -132,6 +133,30 @@ run_argocd_core() {
   [ "$ARGOCD_NAMESPACE" = gitops ] || die 'Argo CD core namespace identity was altered.'
   python3 "$ARGOCD_CORE_RUNNER" --cli "$ARGOCD_CLI" -- "$@"
 }
+
+run_guarded_argocd_diff() (
+  diff_mode=$1
+  diff_expected=$2
+  diff_directory=$3
+  shift 3
+  diff_stdout=$diff_directory/argocd-$diff_mode-diff.stdout
+  diff_stderr=$diff_directory/argocd-$diff_mode-diff.stderr
+  diff_exit=0
+  run_argocd_core "$@" --diff-exit-code 20 >"$diff_stdout" 2>"$diff_stderr" || diff_exit=$?
+  if [ "$diff_mode" = root ]; then
+    diff_validation_status=0
+    python3 "$ARGOCD_DIFF_VALIDATOR" --mode "$diff_mode" --exit-code "$diff_exit" \
+      --stdout "$diff_stdout" --stderr "$diff_stderr" --expected "$diff_expected" || diff_validation_status=$?
+  else
+    diff_validation_status=0
+    python3 "$ARGOCD_DIFF_VALIDATOR" --mode "$diff_mode" --exit-code "$diff_exit" \
+      --stdout "$diff_stdout" --stderr "$diff_stderr" || diff_validation_status=$?
+  fi
+  if [ "$diff_validation_status" -ne 0 ]; then
+    exit "$diff_validation_status"
+  fi
+  cat "$diff_stdout"
+)
 
 require_clean_synchronized_repository() {
   [ -z "$(git -C "$REPOSITORY_ROOT" status --porcelain --untracked-files=normal)" ] ||
