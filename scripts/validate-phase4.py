@@ -320,6 +320,10 @@ def validate_ownership_guards() -> None:
         "b6299767cc614554551e9e7316c1d39616fea00d5de354909082ab0b713a3778",
     ):
         assert checksum in installer
+    install_flow = installer[installer.index("def install()") : installer.index("def expect_failure")]
+    assert install_flow.index("sha256(artifact)") < install_flow.index("os.chmod(artifact, 0o750)")
+    assert install_flow.index("os.chmod(artifact, 0o750)") < install_flow.index("cli_version(artifact)")
+    assert install_flow.index("cli_version(artifact)") < install_flow.index("os.replace(artifact, destination)")
     common = (ROOT / "scripts/lib/gitops-common.sh").read_text(encoding="utf-8")
     assert 'ARGOCD_CLI=$(python3 "$ARGOCD_CLI_INSTALLER" verify)' in common
     assert "command -v argocd" in common and 'version=${version%%+*}' in common

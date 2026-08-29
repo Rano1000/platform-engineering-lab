@@ -220,8 +220,8 @@ def install() -> pathlib.Path:
         download(f"{RELEASE_ROOT}/{filename}", artifact, expected_size)
         if sha256(artifact) != expected_checksum:
             raise InstallError("downloaded Argo CD CLI failed SHA-256 verification")
-        cli_version(artifact)
         os.chmod(artifact, 0o750)
+        cli_version(artifact)
         os.replace(artifact, destination)
         directory_fd = os.open(destination.parent, os.O_RDONLY)
         try:
