@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Added
 
+- Repository-local, checksum-pinned Argo CD v3.5.2 CLI provisioning for guarded diff and synchronization commands.
 - Fail-closed runtime discovery, identity checks, exact `/32` Argo API policies, and worker-pinned network preflight tests for kind/kindnet.
 - A manually dispatched, source-run-bound GHCR publication gate that cannot rebuild, promote, or contact Kubernetes.
 - A manual, pre-publication image-validation path that cannot authorize GHCR publication or promotion.

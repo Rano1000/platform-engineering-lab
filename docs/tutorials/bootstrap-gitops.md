@@ -9,11 +9,12 @@ The root Application is bootstrapped once. It observes merged child Application 
 5. The installation transaction runs worker-pinned, single-assertion network checks, compares endpoint snapshots A and B, and only then starts Helm. Each operation writes structured and sanitized evidence beneath `.artifacts/gitops-network` before temporary cleanup. Snapshot C and live-policy checks run after Helm. A failed check stops without widening a rule or retrying automatically.
 6. Run `make gitops-validate`.
 7. Run `make gitops-bootstrap` once. It applies the dedicated `platform-bootstrap` and `platform-apps` projects and `platform-environment`; it does not apply a child or workload. Root and child Applications must use these dedicated projects and cannot use the deny-all `default` project.
-8. After a promotion merges, run `make gitops-root-status` and `make gitops-root-diff`. The diff reports the complete `environmentRevision` and deterministic child-specification SHA-256.
-9. Confirm stage 1 with `make gitops-root-sync`. Its confirmation contains context, root name, environment revision, chart revision, image source revision, image digest, and specification checksum. It updates only `gitops/golden-path-api` from the immutable environment revision.
-10. Confirm the child is OutOfSync with `make gitops-app-status` and inspect `make gitops-app-diff`.
-11. Review the current-Helm versus proposed-Argo workload diff. It must not unexpectedly rename, recreate, or delete application resources.
-12. Obtain a second approval and run `make gitops-app-sync`.
-13. Validate workload health, routing, security, and ownership.
+8. Install the pinned repository-local CLI with `make gitops-cli-install`. The ignored binary cache requires neither root access nor a system `PATH` change.
+9. After a promotion merges, run `make gitops-root-status` and `make gitops-root-diff`. The diff reports the complete `environmentRevision` and deterministic child-specification SHA-256.
+10. Confirm stage 1 with `make gitops-root-sync`. Its confirmation contains context, root name, environment revision, chart revision, image source revision, image digest, and specification checksum. It updates only `gitops/golden-path-api` from the immutable environment revision.
+11. Confirm the child is OutOfSync with `make gitops-app-status` and inspect `make gitops-app-diff`.
+12. Review the current-Helm versus proposed-Argo workload diff. It must not unexpectedly rename, recreate, or delete application resources.
+13. Obtain a second approval and run `make gitops-app-sync`.
+14. Validate workload health, routing, security, and ownership.
 
 The historical Helm release record remains untouched. Helm mutation guards activate only after the live Deployment carries the child Application's Argo tracking identity.

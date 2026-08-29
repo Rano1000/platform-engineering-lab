@@ -47,7 +47,7 @@ The separate hardening target supports an already installed controller. Before f
 
 The confirmation is `<context>/gitops/default/<uid>/<current-checksum>/<desired-checksum>`. If the exact desired state is already owned by the dedicated manager, validation succeeds without dry-run, confirmation, or forced transfer. `--force-conflicts` is not available through any shared apply helper.
 
-The `argocd` CLI must be exactly v3.5.2 for diff and sync. It uses core mode and Kubernetes authentication; no Argo administrator or public server is required.
+The `argocd` CLI must be exactly v3.5.2 for diff and sync. Install the repository-local copy with `make gitops-cli-install`. The installer downloads the official release binary and official `cli_checksums.txt`, verifies the pinned checksum-manifest digest and platform-specific binary SHA-256, checks the reported version, and atomically installs it under `.tools/argocd/v3.5.2/<os>-<architecture>/argocd`. This ignored cache does not alter the system `PATH` or require root access. Redirects are limited to GitHub release hosts; unsafe paths, symlinks, unsupported platforms, incomplete downloads, and mismatched content fail closed. Guarded commands prefer this verified copy. A system CLI is accepted only when it reports v3.5.2. Core mode uses Kubernetes authentication, so no Argo administrator or public server is required.
 
 Every sync requires the exact context, Application identity, repository, chart revision, image source revision, digest, and a clean local `main` synchronized with `origin/main`. The root alone tracks `main` for change detection. Root diff and sync fetch and resolve it to the complete immutable `environmentRevision`; they never pass `main` to the Argo operation.
 

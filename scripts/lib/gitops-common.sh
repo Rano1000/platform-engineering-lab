@@ -23,6 +23,7 @@ ARGOCD_CONFIG=$REPOSITORY_ROOT/platform/addons/argocd
 ARGOCD_DEFAULT_PROJECT=$ARGOCD_CONFIG/default-project.yaml
 ARGOCD_ENVIRONMENT=$REPOSITORY_ROOT/environments/local/gitops
 ARGOCD_API_POLICY_TEMPLATE=$ARGOCD_CONFIG/api-endpoint-policies.yaml.tpl
+ARGOCD_CLI_INSTALLER=$REPOSITORY_ROOT/scripts/argocd-cli.py
 
 resolve_argocd_api_endpoint() {
   destination=$1
@@ -110,9 +111,19 @@ argo_owns_application() {
 }
 
 require_argocd_cli() {
-  require_command argocd
-  version=$(argocd version --client --short 2>/dev/null | awk '{print $2}' | head -1)
-  [ "$version" = "$ARGOCD_VERSION" ] || die "argocd CLI must be exactly $ARGOCD_VERSION; found ${version:-unknown}."
+  repository_cli=$(python3 "$ARGOCD_CLI_INSTALLER" path) || die 'Unable to resolve the repository-local Argo CD CLI path.'
+  if [ -e "$repository_cli" ] || [ -L "$repository_cli" ]; then
+    ARGOCD_CLI=$(python3 "$ARGOCD_CLI_INSTALLER" verify) ||
+      die "Repository-local Argo CD CLI failed verification. Run 'make gitops-cli-install'."
+  elif command -v argocd >/dev/null 2>&1; then
+    ARGOCD_CLI=$(command -v argocd)
+    version=$("$ARGOCD_CLI" version --client --short 2>/dev/null | awk '{print $2}' | head -1)
+    version=${version%%+*}
+    [ "$version" = "$ARGOCD_VERSION" ] || die "argocd CLI must be exactly $ARGOCD_VERSION; found ${version:-unknown}."
+  else
+    die "Argo CD CLI $ARGOCD_VERSION is unavailable. Run 'make gitops-cli-install'."
+  fi
+  export ARGOCD_CLI
 }
 
 require_clean_synchronized_repository() {

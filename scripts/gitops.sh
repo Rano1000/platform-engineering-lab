@@ -176,7 +176,7 @@ root_diff() {
   trap 'rm -rf "$temporary"' EXIT HUP INT TERM
   prepare_environment_revision "$temporary"
   printf 'Environment revision: %s\nChild specification SHA-256: %s\n' "$environment_revision" "$child_spec_checksum"
-  argocd app diff "$ARGOCD_ROOT_APPLICATION" --core --revision "$environment_revision"
+  "$ARGOCD_CLI" app diff "$ARGOCD_ROOT_APPLICATION" --core --revision "$environment_revision"
 }
 
 root_sync() {
@@ -195,13 +195,13 @@ root_sync() {
   fi
   printf '%s\n' 'Stage 1 changes only the child Application specification in gitops. It does not synchronize or prune workload resources.'
   printf 'Environment revision: %s\nChild specification SHA-256: %s\n' "$environment_revision" "$child_spec_checksum"
-  argocd app diff "$ARGOCD_ROOT_APPLICATION" --core --revision "$environment_revision" || diff_status=$?
+  "$ARGOCD_CLI" app diff "$ARGOCD_ROOT_APPLICATION" --core --revision "$environment_revision" || diff_status=$?
   case ${diff_status:-0} in 0|1) ;; *) die 'Argo diff failed.' ;; esac
   require_environment_revision_current "$environment_revision"
   confirmation=$EXPECTED_CONTEXT/$ARGOCD_ROOT_APPLICATION/$environment_revision/$chart_revision/$image_revision/$digest/sha256:$child_spec_checksum
   confirm_exact "$confirmation" "Synchronize only root Application '$ARGOCD_ROOT_APPLICATION' from immutable environmentRevision '$environment_revision'."
   require_environment_revision_current "$environment_revision"
-  argocd app sync "$ARGOCD_ROOT_APPLICATION" --core --revision "$environment_revision" --prune=false
+  "$ARGOCD_CLI" app sync "$ARGOCD_ROOT_APPLICATION" --core --revision "$environment_revision" --prune=false
   kubectl_lab get application "$ARGOCD_APPLICATION" --namespace "$ARGOCD_NAMESPACE" -o json >"$temporary/live-child.json"
   python3 "$SCRIPT_DIR/validate-reconciliation.py" --application "$application" --evidence "$evidence" \
     --live "$temporary/live-child.json" --expected-checksum "$child_spec_checksum"
@@ -217,7 +217,7 @@ app_diff() {
   require_lab_runtime
   require_argocd_cli
   require_argocd_application
-  argocd app diff "$ARGOCD_APPLICATION" --core
+  "$ARGOCD_CLI" app diff "$ARGOCD_APPLICATION" --core
 }
 
 app_sync() {
@@ -240,11 +240,11 @@ app_sync() {
     die 'Run the approved root sync before workload synchronization.'
   fi
   printf '%s\n' 'Stage 2 changes only resources owned by the child Application. Pruning remains disabled.'
-  argocd app diff "$ARGOCD_APPLICATION" --core || diff_status=$?
+  "$ARGOCD_CLI" app diff "$ARGOCD_APPLICATION" --core || diff_status=$?
   case ${diff_status:-0} in 0|1) ;; *) die 'Argo workload diff failed.' ;; esac
   confirmation=$EXPECTED_CONTEXT/$ARGOCD_APPLICATION/$chart_revision/$image_revision/$digest
   confirm_exact "$confirmation" "Synchronize only child Application '$ARGOCD_APPLICATION'."
-  argocd app sync "$ARGOCD_APPLICATION" --core --revision "$chart_revision" --prune=false
+  "$ARGOCD_CLI" app sync "$ARGOCD_APPLICATION" --core --revision "$chart_revision" --prune=false
 }
 
 uninstall_gitops() {

@@ -2,7 +2,7 @@ SHELL := /bin/sh
 
 .DEFAULT_GOAL := help
 
-.PHONY: help doctor validate lint docs-check cluster-create cluster-status cluster-validate cluster-destroy cluster-recreate namespaces-apply policies-apply app-test app-build app-load app-deploy app-status app-validate app-uninstall app-ownership-status app-network-test app-recovery-test gateway-install gateway-status gateway-validate gateway-uninstall dependency-locks-check dependency-locks-update supply-chain-policy-test supply-chain-secret-scan app-image-artifact app-image-inspect app-sbom app-scan promotion-policy-test publication-policy-test phase4-check ci-check gitops-install gitops-default-project-harden gitops-bootstrap gitops-status gitops-root-status gitops-root-diff gitops-root-sync gitops-app-status gitops-app-diff gitops-app-sync gitops-network-test gitops-validate gitops-uninstall
+.PHONY: help doctor validate lint docs-check cluster-create cluster-status cluster-validate cluster-destroy cluster-recreate namespaces-apply policies-apply app-test app-build app-load app-deploy app-status app-validate app-uninstall app-ownership-status app-network-test app-recovery-test gateway-install gateway-status gateway-validate gateway-uninstall dependency-locks-check dependency-locks-update supply-chain-policy-test supply-chain-secret-scan app-image-artifact app-image-inspect app-sbom app-scan promotion-policy-test publication-policy-test phase4-check ci-check gitops-cli-install gitops-install gitops-default-project-harden gitops-bootstrap gitops-status gitops-root-status gitops-root-diff gitops-root-sync gitops-app-status gitops-app-diff gitops-app-sync gitops-network-test gitops-validate gitops-uninstall
 
 help: ## Show available targets.
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -122,6 +122,9 @@ gateway-validate: ## Validate Traefik and the platform Gateway (read-only).
 
 gateway-uninstall: ## Confirm and remove Traefik while preserving shared CRDs.
 	@./scripts/gateway.sh uninstall
+
+gitops-cli-install: ## Install the verified Argo CD v3.5.2 CLI under .tools.
+	@python3 ./scripts/argocd-cli.py install
 
 gitops-install: ## Confirm and install the exact pinned Argo CD release.
 	@./scripts/gitops.sh install

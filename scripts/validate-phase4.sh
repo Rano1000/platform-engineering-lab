@@ -44,6 +44,7 @@ python3 scripts/validate-default-appproject.py self-test
 python3 scripts/check-optional-argo-application.py --self-test
 python3 scripts/test-appproject-policy.py
 python3 scripts/test-argocd-cache-rbac.py
+python3 scripts/argocd-cli.py self-test
 python3 scripts/validate-promotion.py --evidence "$temporary/promotion-evidence.json" \
   --application "$temporary/child-application.yaml"
 ./scripts/verify-promotion-artifacts.sh self-test

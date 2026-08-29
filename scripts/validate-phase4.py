@@ -297,17 +297,32 @@ def validate_ownership_guards() -> None:
     root_sync = gitops[gitops.index("root_sync()") : gitops.index("app_status()")]
     root_diff = gitops[gitops.index("root_diff()") : gitops.index("root_sync()")]
     app_sync = gitops[gitops.index("app_sync()") : gitops.index("uninstall_gitops()")]
-    assert 'argocd app diff "$ARGOCD_ROOT_APPLICATION" --core --revision "$environment_revision"' in root_sync
-    assert 'argocd app sync "$ARGOCD_ROOT_APPLICATION" --core --revision "$environment_revision" --prune=false' in root_sync
+    assert '"$ARGOCD_CLI" app diff "$ARGOCD_ROOT_APPLICATION" --core --revision "$environment_revision"' in root_sync
+    assert '"$ARGOCD_CLI" app sync "$ARGOCD_ROOT_APPLICATION" --core --revision "$environment_revision" --prune=false' in root_sync
     assert "child_spec_checksum" in root_sync and "require_environment_revision_current" in root_sync
     assert root_sync.count("require_environment_revision_current") == 2
     assert "/sha256:$child_spec_checksum" in root_sync
     assert "--revision main" not in root_sync
-    assert 'argocd app diff "$ARGOCD_ROOT_APPLICATION" --core --revision "$environment_revision"' in root_diff
+    assert '"$ARGOCD_CLI" app diff "$ARGOCD_ROOT_APPLICATION" --core --revision "$environment_revision"' in root_diff
     assert "child_spec_checksum" in root_diff
-    assert f'argocd app sync "$ARGOCD_APPLICATION" --core --revision "$chart_revision" --prune=false' in app_sync
-    assert root_sync.index("argocd app diff") < root_sync.index("confirm_exact") < root_sync.index("argocd app sync")
-    assert app_sync.index("argocd app diff") < app_sync.index("confirm_exact") < app_sync.index("argocd app sync")
+    assert f'"$ARGOCD_CLI" app sync "$ARGOCD_APPLICATION" --core --revision "$chart_revision" --prune=false' in app_sync
+    assert root_sync.index('"$ARGOCD_CLI" app diff') < root_sync.index("confirm_exact") < root_sync.index('"$ARGOCD_CLI" app sync')
+    assert app_sync.index('"$ARGOCD_CLI" app diff') < app_sync.index("confirm_exact") < app_sync.index('"$ARGOCD_CLI" app sync')
+    installer = (ROOT / "scripts/argocd-cli.py").read_text(encoding="utf-8")
+    assert 'VERSION = "v3.5.2"' in installer
+    assert 'CHECKSUM_SHA256 = "61de39311ec152c94a91b621465905961798ce3e0bef0871ca9ca843e22af007"' in installer
+    for checksum in (
+        "9a227201004672e068aa6dacbb1d9548b71c7500e6f01e0290ed036c3ab094e0",
+        "6ef581f2d66b3edd178d31705639fa9b58ce820559d83cf78fef50759d821c77",
+        "d87058531d2aed735100636dd7664bdd49b862588993b571385c49494f9832c1",
+        "a8c326658c54b3a287ea25de91a8517fc4768f65ad810d918cb7444e049cea33",
+        "9de24b64cc5d60bc292c7e1f44c6428e4dd6e2b54694ea99c0e9f81b76620fcd",
+        "b6299767cc614554551e9e7316c1d39616fea00d5de354909082ab0b713a3778",
+    ):
+        assert checksum in installer
+    common = (ROOT / "scripts/lib/gitops-common.sh").read_text(encoding="utf-8")
+    assert 'ARGOCD_CLI=$(python3 "$ARGOCD_CLI_INSTALLER" verify)' in common
+    assert "command -v argocd" in common and 'version=${version%%+*}' in common
 
 
 def main() -> None:
