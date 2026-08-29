@@ -24,6 +24,7 @@ ARGOCD_DEFAULT_PROJECT=$ARGOCD_CONFIG/default-project.yaml
 ARGOCD_ENVIRONMENT=$REPOSITORY_ROOT/environments/local/gitops
 ARGOCD_API_POLICY_TEMPLATE=$ARGOCD_CONFIG/api-endpoint-policies.yaml.tpl
 ARGOCD_CLI_INSTALLER=$REPOSITORY_ROOT/scripts/argocd-cli.py
+ARGOCD_CORE_RUNNER=$REPOSITORY_ROOT/scripts/argocd-core.py
 
 resolve_argocd_api_endpoint() {
   destination=$1
@@ -124,6 +125,12 @@ require_argocd_cli() {
     die "Argo CD CLI $ARGOCD_VERSION is unavailable. Run 'make gitops-cli-install'."
   fi
   export ARGOCD_CLI
+}
+
+run_argocd_core() {
+  [ "$EXPECTED_CONTEXT" = kind-platform-engineering-lab ] || die 'Argo CD core context identity was altered.'
+  [ "$ARGOCD_NAMESPACE" = gitops ] || die 'Argo CD core namespace identity was altered.'
+  python3 "$ARGOCD_CORE_RUNNER" --cli "$ARGOCD_CLI" -- "$@"
 }
 
 require_clean_synchronized_repository() {
