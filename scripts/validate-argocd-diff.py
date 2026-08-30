@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -22,6 +23,8 @@ HEADER = re.compile(r"^===== (?P<kind>\S+) (?P<identity>\S+) ======$")
 COMMAND = re.compile(r"^\d+(?:,\d+)?(?P<operation>[acd])\d+(?:,\d+)?$")
 SAFE_EVIDENCE_NAME = re.compile(r"^[0-9]+-[0-9]+-[0-9]+-(?:root|child)$")
 ROOT_IDENTITY = ("argoproj.io/Application", "gitops/golden-path-api")
+ROOT_APPLICATION = "platform-environment"
+TRACKING_ANNOTATION = "argocd.argoproj.io/tracking-id"
 CHILD_IDENTITIES = {
     ("apps/Deployment", "platform-apps/golden-path-golden-path-api"),
     ("gateway.networking.k8s.io/HTTPRoute", "platform-apps/golden-path-golden-path-api"),
@@ -48,6 +51,23 @@ class DiffValidationError(RuntimeError):
     def __init__(self, message: str, exit_code: int = 1):
         super().__init__(message)
         self.exit_code = exit_code
+
+
+class UniqueKeyLoader(yaml.SafeLoader):
+    """Reject duplicate YAML keys instead of silently keeping the last value."""
+
+
+def construct_unique_mapping(loader: UniqueKeyLoader, node: yaml.MappingNode, deep: bool = False) -> dict:
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(None, None, f"duplicate YAML key: {key}", key_node.start_mark)
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_unique_mapping)
 
 
 def sanitize_text(value: str, limit: int | None = None) -> str:
@@ -227,13 +247,59 @@ def protected_checksum(application: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(canonical(specification), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def required_tracking_identity() -> tuple[str, dict[str, str]]:
+    group_kind, namespace_name = ROOT_IDENTITY
+    group, kind = group_kind.split("/", 1)
+    namespace, name = namespace_name.split("/", 1)
+    components = {
+        "managingRoot": ROOT_APPLICATION,
+        "apiGroup": group,
+        "kind": kind,
+        "namespace": namespace,
+        "resourceName": name,
+    }
+    value = f"{ROOT_APPLICATION}:{group}/{kind}:{namespace}/{name}"
+    return value, components
+
+
+def normalize_tracking_annotation(approved: dict[str, Any], proposed: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    approved_annotations = approved.get("metadata", {}).get("annotations", {})
+    if not isinstance(approved_annotations, dict):
+        raise DiffValidationError("repository Application annotations are malformed")
+    if TRACKING_ANNOTATION in approved_annotations:
+        raise DiffValidationError("repository Application must not supply Argo's runtime tracking annotation")
+    proposed_annotations = proposed.get("metadata", {}).get("annotations", {})
+    if not isinstance(proposed_annotations, dict):
+        raise DiffValidationError("proposed Application annotations are malformed")
+    required_value, components = required_tracking_identity()
+    actual = proposed_annotations.get(TRACKING_ANNOTATION, MISSING)
+    if actual is MISSING:
+        raise DiffValidationError("Argo proposal is missing its required deterministic tracking annotation")
+    if not isinstance(actual, str) or actual != required_value:
+        raise DiffValidationError(
+            f"Argo tracking identity is altered; expected {required_value!r}, proposed {redact_value(actual)!r}"
+        )
+    normalized = copy.deepcopy(proposed)
+    del normalized["metadata"]["annotations"][TRACKING_ANNOTATION]
+    if not normalized["metadata"]["annotations"] and "annotations" not in approved.get("metadata", {}):
+        del normalized["metadata"]["annotations"]
+    decision = {
+        "decision": "accepted_exact_argo_tracking_metadata",
+        "annotation": TRACKING_ANNOTATION,
+        "value": required_value,
+        "components": components,
+        "scope": "root_diff_proposed_child_only",
+    }
+    return normalized, decision
+
+
 def parse_root(sections: list[tuple[tuple[str, str], list[str]]]) -> dict[str, Any]:
     if len(sections) != 1 or sections[0][0] != ROOT_IDENTITY:
         raise DiffValidationError("root diff must create exactly Application/gitops/golden-path-api")
     if classify(sections[0][1]) != "creation":
         raise DiffValidationError("root diff must be a creation, never a modification or deletion")
     rendered = "\n".join(line[2:] for line in sections[0][1] if line.startswith("> ")) + "\n"
-    try: proposed = yaml.safe_load(rendered)
+    try: proposed = yaml.load(rendered, Loader=UniqueKeyLoader)
     except yaml.YAMLError as error: raise DiffValidationError(f"unable to parse the complete proposed Application: {error}") from error
     if not isinstance(proposed, dict): raise DiffValidationError("parsed proposed Application is not an object")
     return proposed
@@ -269,15 +335,18 @@ def validate(mode: str, status: int, stdout: str, stderr: str, expected_path: pa
         evidence.complete(status, "approved_diff"); return
     if expected_path is None or expected_checksum is None or not re.fullmatch(r"[0-9a-f]{64}", expected_checksum):
         raise DiffValidationError("root diff requires the complete protected child specification checksum")
-    try: approved = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
+    try: approved = yaml.load(expected_path.read_text(encoding="utf-8"), Loader=UniqueKeyLoader)
     except (OSError, yaml.YAMLError) as error: raise DiffValidationError(f"unable to parse the approved Application: {error}") from error
     if not isinstance(approved, dict) or protected_checksum(approved) != expected_checksum:
         raise DiffValidationError("approved child specification checksum does not match the protected checksum")
     proposed = parse_root(sections)
+    normalized_proposed, tracking_decision = normalize_tracking_annotation(approved, proposed)
     approved, proposed = canonical(approved), canonical(proposed)
-    differences = compare(approved, proposed)
+    normalized_proposed = canonical(normalized_proposed)
+    differences = compare(approved, normalized_proposed)
     evidence.write_json("approved-application.json", approved)
     evidence.write_json("proposed-application.json", proposed)
+    evidence.write_json("normalization-decisions.json", [tracking_decision])
     evidence.write_json("differences.json", differences)
     evidence.complete(status, "mismatch" if differences else "approved_diff")
     if differences:
@@ -326,15 +395,39 @@ def self_test() -> None:
         approved_path = pathlib.Path(temporary) / "approved.yaml"
         approved_path.write_text(yaml.safe_dump(expected, sort_keys=False), encoding="utf-8")
         checksum = protected_checksum(expected)
-        output = fixture(ROOT_IDENTITY, "a", yaml.safe_dump(expected, sort_keys=False).rstrip())
+        tracked = json.loads(json.dumps(expected))
+        tracked.setdefault("metadata", {}).setdefault("annotations", {})[TRACKING_ANNOTATION] = required_tracking_identity()[0]
+        output = fixture(ROOT_IDENTITY, "a", yaml.safe_dump(tracked, sort_keys=False).rstrip())
         validate("root", 20, output, "", approved_path, checksum, Evidence(EVIDENCE_ROOT / "1-1-1-root"))
-        changed = json.loads(json.dumps(expected)); changed["spec"]["project"] = "other"
+        decision = json.loads((EVIDENCE_ROOT / "1-1-1-root/normalization-decisions.json").read_text(encoding="utf-8"))[0]
+        assert decision["value"] == required_tracking_identity()[0]
+        assert protected_checksum(tracked) == checksum
+        changed = json.loads(json.dumps(tracked)); changed["spec"]["project"] = "other"
         error = expect_failure(lambda: validate("root", 20, fixture(ROOT_IDENTITY, "a", yaml.safe_dump(changed).rstrip()), "", approved_path, checksum, Evidence(EVIDENCE_ROOT / "2-1-1-root")), "changed project")
         assert "/spec/project" in str(error)
         operational = expect_failure(lambda: validate("root", 2, "", "authorization: Bearer private", approved_path, checksum, Evidence(EVIDENCE_ROOT / "3-1-1-root")), "operational failure")
         assert operational.exit_code == 2 and "private" not in str(operational)
+        for index, altered in enumerate((
+            "other:argoproj.io/Application:gitops/golden-path-api",
+            "platform-environment:other/Application:gitops/golden-path-api",
+            "platform-environment:argoproj.io/Other:gitops/golden-path-api",
+            "platform-environment:argoproj.io/Application:other/golden-path-api",
+            "platform-environment:argoproj.io/Application:gitops/other",
+            "platform-environment::argoproj.io/Application:gitops/golden-path-api",
+        ), start=5):
+            malformed = json.loads(json.dumps(tracked)); malformed["metadata"]["annotations"][TRACKING_ANNOTATION] = altered
+            expect_failure(lambda value=malformed, number=index: validate("root", 20, fixture(ROOT_IDENTITY, "a", yaml.safe_dump(value).rstrip()), "", approved_path, checksum, Evidence(EVIDENCE_ROOT / f"{number}-1-1-root")), "malformed tracking identity")
+        expect_failure(lambda: normalize_tracking_annotation(expected, expected), "missing tracking annotation")
+        repository_supplied = json.loads(json.dumps(expected)); repository_supplied.setdefault("metadata", {}).setdefault("annotations", {})[TRACKING_ANNOTATION] = required_tracking_identity()[0]
+        expect_failure(lambda: normalize_tracking_annotation(repository_supplied, tracked), "repository-supplied tracking annotation")
+        unrelated = json.loads(json.dumps(tracked)); unrelated["metadata"].setdefault("labels", {})["unexpected"] = "value"
+        expect_failure(lambda: validate("root", 20, fixture(ROOT_IDENTITY, "a", yaml.safe_dump(unrelated).rstrip()), "", approved_path, checksum, Evidence(EVIDENCE_ROOT / "11-1-1-root")), "unrelated metadata")
+        duplicate_yaml = yaml.safe_dump(tracked, sort_keys=False).rstrip()
+        tracking_line = next(line for line in duplicate_yaml.splitlines() if TRACKING_ANNOTATION in line)
+        duplicate_yaml = duplicate_yaml.replace(tracking_line, f"{tracking_line}\n{tracking_line}")
+        expect_failure(lambda: parse_root(split_sections(fixture(ROOT_IDENTITY, "a", duplicate_yaml))), "multiple tracking annotations")
         expect_failure(lambda: Evidence(EVIDENCE_ROOT / "../unsafe"), "unsafe evidence traversal")
-        incomplete = Evidence(EVIDENCE_ROOT / "4-1-1-root")
+        incomplete = Evidence(EVIDENCE_ROOT / "12-1-1-root")
         incomplete.write_text("argocd-diff.txt", "safe")
         (incomplete.destination / "unexpected").mkdir()
         expect_failure(lambda: incomplete.complete(20, "approved_diff"), "incomplete or unsafe evidence")

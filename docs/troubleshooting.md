@@ -92,6 +92,8 @@ Argo CD v3.5.2 normally returns a nonzero status when differences exist. Reposit
 
 When the proposed root Application differs from the repository manifest, inspect the unique ignored directory under `.artifacts/gitops-diff`. `differences.json` reports every JSON Pointer, expected and proposed value, missing/additional/changed state, and diagnostic classification. The checksummed evidence manifest must be complete. Defaulted, representational, or Argo-added metadata remains rejected until a separate semantic review approves a narrowly scoped correction.
 
+The sole approved root-diff metadata normalization is Argo's exact child tracking annotation. Missing, duplicate, repository-supplied, or altered tracking identity fails, as does any additional annotation, label, or metadata field. Inspect `normalization-decisions.json`; do not add the runtime annotation to the desired-state manifest.
+
 If core mode reports that `argocd-cm` is absent from the default `argocd` namespace, the guarded namespace isolation is missing or invalid. All repository commands must use the validated temporary kubeconfig and explicit `--app-namespace gitops` binding. Do not change the user's current kubeconfig namespace, export an Argo namespace variable, or copy configuration from a running Pod.
 
 If a GitOps network assertion fails, inspect its unique directory under `.artifacts/gitops-network`. Every probe log is one JSON object naming the source identity, worker, destination, expectation, observation, duration, exit code, and error category. Pod status, termination state, description, events, policies, EndpointSlice, and node evidence are captured before cleanup. An empty or unsafe diagnostic set deliberately leaves temporary resources for separate inspection.

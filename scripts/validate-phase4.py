@@ -349,6 +349,10 @@ def validate_ownership_guards() -> None:
     assert "metadata_added_by_argo" in diff_validator and "kubernetes_or_argo_defaulted" in diff_validator
     assert "protected_checksum(approved) != expected_checksum" in diff_validator
     assert 'evidence.write_json("differences.json", differences)' in diff_validator
+    assert 'TRACKING_ANNOTATION = "argocd.argoproj.io/tracking-id"' in diff_validator
+    assert 'ROOT_APPLICATION = "platform-environment"' in diff_validator
+    assert 'evidence.write_json("normalization-decisions.json", [tracking_decision])' in diff_validator
+    assert "repository Application must not supply Argo's runtime tracking annotation" in diff_validator
     assert 'run_argocd_core "$@" --diff-exit-code 20' in common
 
 
