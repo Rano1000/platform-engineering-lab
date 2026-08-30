@@ -197,7 +197,7 @@ record = {
 )
 destination.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
 PY
-}
+)
 
 root_diff() {
   require_lab_runtime

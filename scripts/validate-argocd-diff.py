@@ -341,7 +341,7 @@ def load_transition(path: pathlib.Path, application: pathlib.Path, checksum: str
         raise DiffValidationError("protected child specification checksum differs from transition policy")
     try:
         tree = subprocess.run(
-            ["git", "-C", str(ROOT), "rev-parse", f'{transition["newChartRevision"]}:charts/golden-path-api'],
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD:charts/golden-path-api"],
             check=True, capture_output=True, text=True,
         ).stdout.strip()
     except subprocess.CalledProcessError as error:
