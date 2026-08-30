@@ -95,6 +95,11 @@ check_shell() {
   else
     warn 'shellcheck is unavailable; syntax checks passed.'
   fi
+  if python3 scripts/validate-python-heredocs.py; then
+    pass 'embedded Python heredocs compile.'
+  else
+    fail 'embedded Python heredoc compilation failed.'
+  fi
 }
 
 check_markdown() {

@@ -194,7 +194,7 @@ canonical = json.dumps(value, sort_keys=True, separators=(",", ":")) if value is
 record = {
     "schemaVersion": 1, "context": context, "namespace": namespace, "name": name,
     "state": state, "object": value, "objectSha256": hashlib.sha256(canonical.encode()).hexdigest(),
-)
+}
 destination.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
 PY
 )
@@ -311,5 +311,12 @@ case ${1:-} in
   app-sync) app_sync ;;
   validate) "$SCRIPT_DIR/validate-gitops.sh" ;;
   uninstall) uninstall_gitops ;;
+  self-test-lifecycle)
+    [ "${PLATFORM_LAB_SELF_TEST:-}" = 1 ] || die 'Lifecycle fixture entry point is restricted to repository self-tests.'
+    [ "$#" -eq 2 ] && [ -f "${GITOPS_LIFECYCLE_FIXTURE:-}" ] || die 'Lifecycle fixture input and output are required.'
+    kubectl_lab() { cat -- "$GITOPS_LIFECYCLE_FIXTURE"; }
+    mkdir -p -- "$2"
+    capture_child_lifecycle_state "$2"
+    ;;
   *) usage ;;
 esac

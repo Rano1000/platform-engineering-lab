@@ -32,6 +32,7 @@ All notable changes to this project will be documented in this file. The format 
 - Keep the GitOps workload chart within `platform-apps` and create the observability metrics egress policy only as a guarded temporary validation resource.
 - Suppress a redundant chart-promotion proposal when committed evidence already identifies identical approved chart content.
 - Make guarded root diffs lifecycle-aware, preserving strict initial creation while allowing only a checksummed, forward chart-identity modification after bootstrap.
+- Compile embedded Python heredocs during validation and exercise lifecycle-state evidence generation through its shell entry point.
 - Distinguish expected Argo CD diffs from operational failures and accept them only after bounded semantic resource validation.
 - Retain atomic, sanitized guarded-diff evidence with canonical JSON-Pointer diagnostics for every proposed Application mismatch.
 - Permit only Argo CD's identity-derived child tracking annotation during guarded root-diff normalization.

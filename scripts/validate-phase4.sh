@@ -49,6 +49,7 @@ python3 scripts/argocd-cli.py self-test
 python3 scripts/argocd-core.py --self-test
 python3 scripts/validate-argocd-diff.py --self-test
 ./scripts/test-argocd-diff-shell.sh
+./scripts/test-lifecycle-state-capture.sh
 python3 scripts/validate-promotion.py --evidence "$temporary/promotion-evidence.json" \
   --application "$temporary/child-application.yaml"
 ./scripts/verify-promotion-artifacts.sh self-test
