@@ -324,23 +324,24 @@ import yaml
 policies = [doc for doc in yaml.safe_load_all(open(sys.argv[1], encoding="utf-8"))
             if isinstance(doc, dict) and doc.get("kind") == "NetworkPolicy"]
 ingress = next((doc for doc in policies if doc["metadata"]["name"].endswith("-allow-approved-ingress")), None)
-egress = next((doc for doc in policies if doc["metadata"]["name"].endswith("-metrics-test-egress")), None)
-if ingress is None or egress is None:
-    raise SystemExit("expected application ingress and metrics-test egress policies")
+if ingress is None or len(policies) != 1:
+    raise SystemExit("the chart must own exactly one platform-apps ingress policy")
 ingress_rules = ingress.get("spec", {}).get("ingress", [])
-egress_rules = egress.get("spec", {}).get("egress", [])
 if len(ingress_rules) != 2 or any("from" not in rule or "to" in rule for rule in ingress_rules):
     raise SystemExit(f"unexpected application ingress rules: {ingress_rules!r}")
-if len(egress_rules) != 1 or "to" not in egress_rules[0] or "from" in egress_rules[0]:
-    raise SystemExit(f"unexpected metrics-test egress rules: {egress_rules!r}")
-for rule in ingress_rules + egress_rules:
+for rule in ingress_rules:
     if rule.get("ports") != [{"protocol": "TCP", "port": 8080}]:
         raise SystemExit(f"unexpected application policy port: {rule.get('ports')!r}")
+for document in yaml.safe_load_all(open(sys.argv[1], encoding="utf-8")):
+    if isinstance(document, dict):
+        namespace = document.get("metadata", {}).get("namespace", "platform-apps")
+        if namespace != "platform-apps":
+            raise SystemExit(f"application chart renders a cross-namespace resource: {document.get('kind')} {namespace}")
 PY
   then
-    pass 'application and metrics-test NetworkPolicy directions are structurally correct.'
+    pass 'application chart owns only platform-apps resources and preserves narrow ingress.'
   else
-    fail 'application or metrics-test NetworkPolicy direction is incorrect.'
+    fail 'application chart ownership or ingress NetworkPolicy is incorrect.'
   fi
   if grep -q '^kind: HorizontalPodAutoscaler$' "$hpa_rendered" && ! grep -q '^kind: HorizontalPodAutoscaler$' "$rendered"; then
     pass 'HPA renders only when autoscaling is explicitly enabled.'

@@ -28,7 +28,6 @@ TRACKING_ANNOTATION = "argocd.argoproj.io/tracking-id"
 CHILD_IDENTITIES = {
     ("apps/Deployment", "platform-apps/golden-path-golden-path-api"),
     ("gateway.networking.k8s.io/HTTPRoute", "platform-apps/golden-path-golden-path-api"),
-    ("networking.k8s.io/NetworkPolicy", "observability/golden-path-golden-path-api-metrics-test-egress"),
     ("networking.k8s.io/NetworkPolicy", "platform-apps/golden-path-golden-path-api-allow-approved-ingress"),
     ("policy/PodDisruptionBudget", "platform-apps/golden-path-golden-path-api"),
     ("/ConfigMap", "platform-apps/golden-path-golden-path-api"),
@@ -307,6 +306,9 @@ def parse_root(sections: list[tuple[tuple[str, str], list[str]]]) -> dict[str, A
 
 def validate_child(sections: list[tuple[tuple[str, str], list[str]]]) -> None:
     for identity, body in sections:
+        namespace_name = identity[1].split("/", 1)
+        if len(namespace_name) != 2 or namespace_name[0] != "platform-apps":
+            raise DiffValidationError(f"child diff contains a resource outside platform-apps: {identity[0]} {identity[1]}")
         if identity not in CHILD_IDENTITIES:
             raise DiffValidationError(f"child diff contains an unapproved resource: {identity[0]} {identity[1]}")
         if classify(body) == "deletion":
@@ -427,6 +429,9 @@ def self_test() -> None:
         duplicate_yaml = duplicate_yaml.replace(tracking_line, f"{tracking_line}\n{tracking_line}")
         expect_failure(lambda: parse_root(split_sections(fixture(ROOT_IDENTITY, "a", duplicate_yaml))), "multiple tracking annotations")
         expect_failure(lambda: Evidence(EVIDENCE_ROOT / "../unsafe"), "unsafe evidence traversal")
+        cross_namespace = fixture(("networking.k8s.io/NetworkPolicy", "observability/nope"), "a")
+        error = expect_failure(lambda: validate("child", 20, cross_namespace, "", None, None, Evidence(EVIDENCE_ROOT / "13-1-1-child")), "cross-namespace child resource")
+        assert "outside platform-apps" in str(error)
         incomplete = Evidence(EVIDENCE_ROOT / "12-1-1-root")
         incomplete.write_text("argocd-diff.txt", "safe")
         (incomplete.destination / "unexpected").mkdir()

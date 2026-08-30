@@ -29,6 +29,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Keep the GitOps workload chart within `platform-apps` and create the observability metrics egress policy only as a guarded temporary validation resource.
 - Distinguish expected Argo CD diffs from operational failures and accept them only after bounded semantic resource validation.
 - Retain atomic, sanitized guarded-diff evidence with canonical JSON-Pointer diagnostics for every proposed Application mismatch.
 - Permit only Argo CD's identity-derived child tracking annotation during guarded root-diff normalization.

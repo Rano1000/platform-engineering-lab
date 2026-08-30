@@ -26,7 +26,7 @@ The local build refuses uncommitted image inputs and refuses to replace an exist
 
 Read-only commands are `make app-status`, `make app-validate`, and `make app-ownership-status`. Build, load, deploy, uninstall, network-test, and recovery-test targets change local Docker or the exact lab cluster and must be used deliberately. Helm deployment and uninstall refuse to run after the repository-owned Argo Application exists.
 
-`make app-network-test` creates uniquely named Pods in `observability`, proves labelled metrics traffic is allowed and unlabelled traffic is denied, and removes both Pods through a cleanup trap.
+`make app-network-test` creates one uniquely named egress NetworkPolicy and two uniquely named Pods in `observability`. It proves labelled metrics traffic is allowed and unlabelled traffic is denied, then removes all three resources through a cleanup trap. This policy is validation-owned temporary state; it is not part of the application chart or Argo CD workload ownership. The chart renders resources only in `platform-apps`.
 
 `make app-recovery-test` displays the exact application Pod, requires its name as confirmation, deletes only that Pod, and verifies that the Deployment restores two replicas.
 

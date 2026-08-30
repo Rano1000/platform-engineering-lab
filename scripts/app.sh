@@ -91,17 +91,65 @@ network_test() {
   suffix="$(date +%s)-$$"
   allowed="metrics-allowed-$suffix"
   denied="metrics-denied-$suffix"
+  policy="metrics-test-egress-$suffix"
   cleanup() {
-    kubectl_lab delete pod "$allowed" "$denied" --namespace observability --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    app_cleanup_status=0
+    kubectl_lab delete pod "$allowed" "$denied" --namespace observability --ignore-not-found --wait=true || app_cleanup_status=1
+    kubectl_lab delete networkpolicy "$policy" --namespace observability --ignore-not-found --wait=true || app_cleanup_status=1
+    for app_cleanup_resource in "pod/$allowed" "pod/$denied" "networkpolicy/$policy"; do
+      if kubectl_lab get "$app_cleanup_resource" --namespace observability >/dev/null 2>&1; then
+        printf 'Cleanup failed: %s still exists in observability.\n' "$app_cleanup_resource" >&2
+        app_cleanup_status=1
+      fi
+    done
+    return "$app_cleanup_status"
+  }
+  cleanup_on_exit() {
+    app_test_status=$?
+    trap - EXIT HUP INT TERM
+    app_cleanup_status=0
+    cleanup || app_cleanup_status=$?
+    if [ "$app_test_status" -ne 0 ]; then
+      exit "$app_test_status"
+    fi
+    exit "$app_cleanup_status"
   }
   pod_overrides() {
     printf '{"spec":{"automountServiceAccountToken":false,"securityContext":{"runAsNonRoot":true,"runAsUser":10001,"runAsGroup":10001,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"%s","image":"%s","command":["python","-c"],"args":["%s"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"readOnlyRootFilesystem":true}}]}}' "$1" "$reference" "$2"
   }
-  trap cleanup EXIT HUP INT TERM
-  printf '%s\n' 'This test creates two uniquely named temporary Pods in observability, verifies one allowed and one denied connection, and removes both.'
+  trap cleanup_on_exit EXIT HUP INT TERM
+  printf '%s\n' 'This test creates one uniquely named egress NetworkPolicy and two Pods in observability, verifies labelled access and default denial, then removes all three resources.'
+  printf '%s\n' "apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: $policy
+  namespace: observability
+  labels:
+    app.kubernetes.io/managed-by: platform-engineering-lab
+    platform.engineering-lab/purpose: metrics-test
+    platform.engineering-lab/run-id: $suffix
+spec:
+  podSelector:
+    matchLabels:
+      platform.engineering-lab/purpose: metrics-test
+      platform.engineering-lab/run-id: $suffix
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-apps
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: golden-path
+              app.kubernetes.io/name: golden-path-api
+      ports:
+        - protocol: TCP
+          port: 8080" | kubectl_lab apply -f -
   allowed_command="import urllib.request; data=urllib.request.urlopen('http://$APP_SERVICE.$APP_NAMESPACE.svc:80/metrics', timeout=5).read(); assert b'golden_path_http_requests_total' in data"
   kubectl_lab run "$allowed" --namespace observability --restart=Never --image="$reference" \
-    --labels='platform.engineering-lab/purpose=metrics-test' --overrides="$(pod_overrides "$allowed" "$allowed_command")"
+    --labels="platform.engineering-lab/purpose=metrics-test,platform.engineering-lab/run-id=$suffix" \
+    --overrides="$(pod_overrides "$allowed" "$allowed_command")"
   kubectl_lab wait --namespace observability --for=jsonpath='{.status.phase}'=Succeeded "pod/$allowed" --timeout=30s
   denied_command="import urllib.request; urllib.request.urlopen('http://$APP_SERVICE.$APP_NAMESPACE.svc:80/metrics', timeout=5)"
   kubectl_lab run "$denied" --namespace observability --restart=Never --image="$reference" \

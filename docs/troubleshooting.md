@@ -28,6 +28,12 @@ Confirm the GHCR package is public and linked to this repository, all three atte
 
 This is expected after the `gitops/golden-path-api` Application exists. Use `make app-ownership-status` to inspect ownership. Do not use Helm as a second active manager; follow the documented GitOps reversal procedure before returning ownership to Helm.
 
+## A Helm-owned metrics-test policy remains in observability
+
+Earlier Phase 2 chart revisions installed `NetworkPolicy/observability/golden-path-golden-path-api-metrics-test-egress`. The policy is a validation fixture, not application desired state. Do not widen `AppProject/platform-apps` or delete the live policy during repository reconciliation.
+
+First review the root and child diffs. Because pruning is disabled, synchronizing the corrected chart does not delete the existing Helm-owned policy. A separate exact-resource runtime gate must record its UID and Helm ownership, delete only that named policy, and then run `make app-network-test`. The guarded test creates a uniquely named replacement policy, proves approved and denied metrics flows, and removes its temporary policy and Pods.
+
 ## Root synchronization reports that origin/main changed
 
 This is a safety stop. Root diff and sync operate on one complete `environmentRevision`, not mutable `main`. Update local `main`, rerun the root diff, review the new environment revision and child-specification checksum, and confirm again. Never substitute an abbreviated SHA or bypass the second remote check.

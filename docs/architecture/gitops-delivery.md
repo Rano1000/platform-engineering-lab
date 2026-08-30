@@ -25,6 +25,8 @@ The manually bootstrapped `platform-environment` root Application tracks `main` 
 
 The child `golden-path-api` Application uses the separate `platform-apps` project. That project constrains the repository, cluster, namespace, and workload resource kinds. Both dedicated projects use an empty cluster-resource allowlist and exact namespaced-resource allowlists; neither can manage any cluster-scoped kind. AppProject cannot constrain a repository subdirectory, so repository validation and guarded automation enforce both environment and chart paths.
 
+The application chart owns resources only in `platform-apps`. Its ingress policy permits an explicitly labelled metrics client from `observability`, but the matching egress policy is a uniquely named temporary fixture owned by the guarded network test. Keeping that fixture outside permanent desired state avoids cross-namespace workload ownership while preserving the isolation proof.
+
 Controller installation retains Argo CD's built-in `default` AppProject but replaces its permissions with a repository-owned deny-all specification. It contains no permitted repositories, destinations, or resource kinds. This prevents an unreviewed Application from bypassing the dedicated bootstrap and workload project boundaries.
 
 The application controller uses Argo CD's `resource.respectRBAC: normal` cache mode. It watches only resources its exact Kubernetes RBAC permits and stops watching unrelated APIs after an authorization denial. This avoids granting cluster-wide read visibility or maintaining a growing exclusion list as CRDs change.

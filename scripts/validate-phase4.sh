@@ -43,6 +43,7 @@ python3 scripts/test-gitops-install.py
 python3 scripts/validate-default-appproject.py self-test
 python3 scripts/check-optional-argo-application.py --self-test
 python3 scripts/test-appproject-policy.py
+python3 scripts/test-metrics-policy-ownership.py
 python3 scripts/test-argocd-cache-rbac.py
 python3 scripts/argocd-cli.py self-test
 python3 scripts/argocd-core.py --self-test
