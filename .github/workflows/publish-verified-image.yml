@@ -98,7 +98,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Download exact source-run artifacts
-        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}
@@ -240,7 +240,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Download verified publication input
-        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           name: verified-publication-input-${{ inputs.source_revision }}
           path: .artifacts/publication
@@ -287,7 +287,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Download verified source evidence
-        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           name: verified-publication-input-${{ inputs.source_revision }}
           path: .artifacts/publication
@@ -350,7 +350,7 @@ jobs:
       attestations: write
     steps:
       - name: Download promotion evidence
-        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           name: publication-evidence-${{ inputs.source_revision }}
           path: evidence
