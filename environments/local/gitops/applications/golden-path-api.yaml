@@ -6,7 +6,7 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: platform-engineering-lab
   annotations:
-    platform.engineering-lab/chart-revision: "f6171ce973cbe47244dfeb7e6698e4279ba0df18"
+    platform.engineering-lab/chart-revision: "7908f4c63e691afa967867638c306a0be3765e81"
     platform.engineering-lab/image-source-revision: "e4cbf6cfa1817fe8dede7eb80d75bb94131163b2"
     platform.engineering-lab/image-digest: "sha256:e12b5835af642aa1ea153ed27b4aa0481c1cf03e434702106bf57dfeeb7a70cf"
     platform.engineering-lab/evidence-file: ../evidence/golden-path-api.json
@@ -14,7 +14,7 @@ spec:
   project: platform-apps
   source:
     repoURL: https://github.com/Rano1000/platform-engineering-lab.git
-    targetRevision: "f6171ce973cbe47244dfeb7e6698e4279ba0df18"
+    targetRevision: "7908f4c63e691afa967867638c306a0be3765e81"
     path: charts/golden-path-api
     helm:
       releaseName: golden-path

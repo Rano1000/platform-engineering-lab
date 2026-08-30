@@ -12,7 +12,7 @@
       "sbom": "sha256:f9117f7588c2c66b582fc431299c223fae40767febf2dca90ee63232e0117d0b"
     }
   },
-  "chartRevision": "f6171ce973cbe47244dfeb7e6698e4279ba0df18",
+  "chartRevision": "7908f4c63e691afa967867638c306a0be3765e81",
   "image": "ghcr.io/rano1000/golden-path-api",
   "imageDigest": "sha256:e12b5835af642aa1ea153ed27b4aa0481c1cf03e434702106bf57dfeeb7a70cf",
   "imageSourceRevision": "e4cbf6cfa1817fe8dede7eb80d75bb94131163b2",
