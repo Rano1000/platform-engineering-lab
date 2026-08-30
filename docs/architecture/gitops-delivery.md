@@ -43,6 +43,8 @@ The OCI revision must equal the image source revision, while the child chart sou
 
 The complete approved child `spec` is serialized as canonical JSON and hashed with SHA-256. Root diff displays this checksum; root sync includes it in confirmation and requires the live child specification to reproduce it exactly. If `origin/main` advances after an older immutable revision is synchronized, the root correctly returns to OutOfSync and waits for another review.
 
+Root-diff validation is lifecycle-aware. A validated absent-child snapshot permits only the initial complete creation. A validated present-child snapshot permits only a version-controlled forward chart transition whose exact JSON Pointers, before/after revisions, manifest, evidence, chart tree, image identity, and protected specification checksums all match. Argo diff text cannot select the lifecycle mode, and deletion is never accepted.
+
 The Argo API server is ClusterIP-only, has no Gateway route, and has its built-in administrator disabled. Core-mode CLI operations use the operator's existing Kubernetes authentication.
 
 ## Controller API boundary

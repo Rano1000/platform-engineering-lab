@@ -16,7 +16,7 @@ run_argocd_core() {
 }
 
 mkdir "$temporary/allowed" "$temporary/operational"
-run_guarded_argocd_diff child '' '' "$temporary/allowed" app diff golden-path-api >/dev/null
+run_guarded_argocd_diff child '' '' "$temporary/allowed" '' app diff golden-path-api >/dev/null
 
 run_argocd_core() {
   printf '%s\n' 'authentication failed' >&2
@@ -24,7 +24,7 @@ run_argocd_core() {
 }
 
 failure_status=0
-run_guarded_argocd_diff child '' '' "$temporary/operational" app diff golden-path-api \
+run_guarded_argocd_diff child '' '' "$temporary/operational" '' app diff golden-path-api \
   >"$temporary/operational.stdout" 2>"$temporary/operational.stderr" || failure_status=$?
 [ "$failure_status" -eq 2 ] || {
   printf '%s\n' 'FAIL  operational Argo error passed guarded diff.' >&2

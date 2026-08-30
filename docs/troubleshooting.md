@@ -38,6 +38,10 @@ First review the root and child diffs. Because pruning is disabled, synchronizin
 
 This is a safety stop. Root diff and sync operate on one complete `environmentRevision`, not mutable `main`. Update local `main`, rerun the root diff, review the new environment revision and child-specification checksum, and confirm again. Never substitute an abbreviated SHA or bypass the second remote check.
 
+## Root diff reports a lifecycle mismatch
+
+The guarded validator records whether the child Application was present or absent before Argo produced its diff. An absent child permits only initial creation; an existing child permits only the exact reviewed forward chart transition. Do not edit the evidence or retry with a different diff shape. Inspect the sanitized lifecycle record, before/after objects, field differences, and decision beneath `.artifacts/gitops-diff`, then correct the repository policy through review.
+
 ## Doctor reports Docker connectivity failure
 
 Confirm the Docker service or Docker Desktop is running, then run `docker info`. On Linux, verify that your user is authorized to access the configured Docker socket. Do not change socket permissions broadly; use the operating system's documented Docker group or rootless setup.

@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import tempfile
 from typing import Any
@@ -44,6 +45,22 @@ DEFAULTED_POINTERS = {
     "/spec/source/helm/ignoreMissingValueFiles", "/spec/destination/name",
 }
 MISSING = object()
+ALLOWED_TRANSITION_POINTERS = {
+    "/metadata/annotations/platform.engineering-lab~1chart-revision",
+    "/spec/source/targetRevision",
+}
+EXPECTED_TRANSITION = {
+    "applicationManifestSha256": "aaff03e8056fa80d42e1f3d7ece05a8fd5474073a748f9f2b2b524668ab32725",
+    "approvedEnvironmentRevision": "e16bef72ee5299d62be2510e0b5e2a71efb7753a",
+    "chartTree": "1434d967b4087a7a8ea738aa1770192c61926dee",
+    "imageDigest": "sha256:e12b5835af642aa1ea153ed27b4aa0481c1cf03e434702106bf57dfeeb7a70cf",
+    "imageSourceRevision": "e4cbf6cfa1817fe8dede7eb80d75bb94131163b2",
+    "newChartRevision": "f6171ce973cbe47244dfeb7e6698e4279ba0df18",
+    "previousChartRevision": "3787c00564553253be81d41ce5ec2b567d4f6d5d",
+    "promotionEvidenceSha256": "812a018017e3d6cd1e38f68bafba71ef3b06d4b9566e3545a63d7814e9ece5f2",
+    "protectedChildSpecSha256": "90f5b71259c9fb7f7f477067abb763f5a6019d40149fdb96180ae9a712e7334b",
+    "schemaVersion": 1,
+}
 
 
 class DiffValidationError(RuntimeError):
@@ -292,7 +309,7 @@ def normalize_tracking_annotation(approved: dict[str, Any], proposed: dict[str, 
     return normalized, decision
 
 
-def parse_root(sections: list[tuple[tuple[str, str], list[str]]]) -> dict[str, Any]:
+def parse_root_creation(sections: list[tuple[tuple[str, str], list[str]]]) -> dict[str, Any]:
     if len(sections) != 1 or sections[0][0] != ROOT_IDENTITY:
         raise DiffValidationError("root diff must create exactly Application/gitops/golden-path-api")
     if classify(sections[0][1]) != "creation":
@@ -302,6 +319,142 @@ def parse_root(sections: list[tuple[tuple[str, str], list[str]]]) -> dict[str, A
     except yaml.YAMLError as error: raise DiffValidationError(f"unable to parse the complete proposed Application: {error}") from error
     if not isinstance(proposed, dict): raise DiffValidationError("parsed proposed Application is not an object")
     return proposed
+
+
+def sha256_file(path: pathlib.Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_transition(path: pathlib.Path, application: pathlib.Path, checksum: str) -> dict[str, Any]:
+    try:
+        transition = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise DiffValidationError(f"unable to parse the root transition policy: {error}") from error
+    if transition != EXPECTED_TRANSITION:
+        raise DiffValidationError("root transition policy differs from the approved protected identities")
+    evidence = application.with_name("golden-path-api.json")
+    if sha256_file(application) != transition["applicationManifestSha256"]:
+        raise DiffValidationError("approved Application manifest checksum differs from transition policy")
+    if not evidence.is_file() or sha256_file(evidence) != transition["promotionEvidenceSha256"]:
+        raise DiffValidationError("promotion evidence checksum differs from transition policy")
+    if checksum != transition["protectedChildSpecSha256"]:
+        raise DiffValidationError("protected child specification checksum differs from transition policy")
+    try:
+        tree = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", f'{transition["newChartRevision"]}:charts/golden-path-api'],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+    except subprocess.CalledProcessError as error:
+        raise DiffValidationError("unable to resolve the approved chart tree") from error
+    if tree != transition["chartTree"]:
+        raise DiffValidationError("approved chart tree differs from transition policy")
+    return transition
+
+
+def load_live_state(path: pathlib.Path) -> tuple[str, dict[str, Any] | None, dict[str, Any]]:
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise DiffValidationError(f"unable to parse live-state evidence: {error}") from error
+    required = {"schemaVersion", "context", "namespace", "name", "state", "object", "objectSha256"}
+    if set(record) != required or record["schemaVersion"] != 1:
+        raise DiffValidationError("live-state evidence has an unexpected schema")
+    if (record["context"], record["namespace"], record["name"]) != (
+        "kind-platform-engineering-lab", "gitops", "golden-path-api"
+    ):
+        raise DiffValidationError("live-state evidence has an unexpected protected identity")
+    if record["state"] not in {"absent", "present"}:
+        raise DiffValidationError("live-state evidence has an invalid lifecycle state")
+    value = record["object"]
+    canonical_value = json.dumps(value, sort_keys=True, separators=(",", ":")) if value is not None else "null"
+    if hashlib.sha256(canonical_value.encode()).hexdigest() != record["objectSha256"]:
+        raise DiffValidationError("live-state evidence checksum mismatch")
+    if record["state"] == "absent" and value is not None:
+        raise DiffValidationError("absent live-state evidence contains an object")
+    if record["state"] == "present":
+        if not isinstance(value, dict):
+            raise DiffValidationError("present live-state evidence has no object")
+        metadata = value.get("metadata", {})
+        if value.get("apiVersion") != "argoproj.io/v1alpha1" or value.get("kind") != "Application" or \
+                metadata.get("name") != "golden-path-api" or metadata.get("namespace") != "gitops":
+            raise DiffValidationError("live-state object has an unexpected identity")
+    return record["state"], value, record
+
+
+def protected_application(value: dict[str, Any], require_tracking: bool) -> dict[str, Any]:
+    metadata = value.get("metadata", {})
+    annotations = metadata.get("annotations", {})
+    protected_annotations = {
+        key: annotations[key] for key in sorted(annotations)
+        if key.startswith("platform.engineering-lab/") or key == TRACKING_ANNOTATION
+    }
+    if require_tracking and protected_annotations.get(TRACKING_ANNOTATION) != required_tracking_identity()[0]:
+        raise DiffValidationError("live child has an altered or missing Argo tracking annotation")
+    return canonical({
+        "apiVersion": value.get("apiVersion"), "kind": value.get("kind"),
+        "metadata": {
+            "name": metadata.get("name"), "namespace": metadata.get("namespace"),
+            "labels": metadata.get("labels", {}), "annotations": protected_annotations,
+        },
+        "spec": value.get("spec"),
+    })
+
+
+def validate_root_lifecycle(sections: list[tuple[tuple[str, str], list[str]]], approved: dict[str, Any],
+                            live_state: str, live: dict[str, Any] | None,
+                            transition: dict[str, Any], evidence: Evidence) -> None:
+    if len(sections) != 1 or sections[0][0] != ROOT_IDENTITY:
+        raise DiffValidationError("root diff must contain exactly Application/gitops/golden-path-api")
+    action = classify(sections[0][1])
+    if action == "deletion":
+        raise DiffValidationError("root diff must never delete the child Application")
+    if live_state == "absent":
+        if action != "creation":
+            raise DiffValidationError("an absent child permits only one complete creation")
+        proposed = parse_root_creation(sections)
+        normalized, tracking = normalize_tracking_annotation(approved, proposed)
+        differences = compare(canonical(approved), canonical(normalized))
+        evidence.write_json("before-application.json", None)
+        evidence.write_json("after-application.json", proposed)
+        evidence.write_json("differences.json", differences)
+        evidence.write_json("lifecycle-decision.json", {"mode": "initial_creation", "action": action, "tracking": tracking})
+        if differences:
+            raise DiffValidationError("initial child creation differs from the complete approved manifest")
+        return
+    if action != "modification" or live is None:
+        raise DiffValidationError("an existing child permits only one protected modification")
+    before = protected_application(live, True)
+    after = copy.deepcopy(approved)
+    after.setdefault("metadata", {}).setdefault("annotations", {})[TRACKING_ANNOTATION] = required_tracking_identity()[0]
+    after = protected_application(after, True)
+    differences = compare(before, after)
+    paths = {item["path"] for item in differences}
+    if paths != ALLOWED_TRANSITION_POINTERS or any(item["state"] != "changed" for item in differences):
+        raise DiffValidationError(f"root modification changes unapproved protected fields: {sorted(paths)}")
+    old_revision, new_revision = transition["previousChartRevision"], transition["newChartRevision"]
+    expected_values = {
+        "/metadata/annotations/platform.engineering-lab~1chart-revision": (old_revision, new_revision),
+        "/spec/source/targetRevision": (old_revision, new_revision),
+    }
+    for item in differences:
+        if (item["expected"], item["proposed"]) != expected_values[item["path"]]:
+            raise DiffValidationError(f"root modification has an unapproved chart transition at {item['path']}")
+    payload = [line for line in sections[0][1] if line.startswith(("< ", "> "))]
+    required_payload = [
+        f"<     platform.engineering-lab/chart-revision: {old_revision}",
+        f">     platform.engineering-lab/chart-revision: {new_revision}",
+        f"<     targetRevision: {old_revision}", f">     targetRevision: {new_revision}",
+    ]
+    if sorted(payload) != sorted(required_payload):
+        raise DiffValidationError("Argo modification output contains an additional, missing, or altered field")
+    evidence.write_json("before-application.json", before)
+    evidence.write_json("after-application.json", after)
+    evidence.write_json("differences.json", differences)
+    evidence.write_json("lifecycle-decision.json", {
+        "mode": "post_bootstrap_modification", "action": action,
+        "allowedPointers": sorted(ALLOWED_TRANSITION_POINTERS),
+        "trackingAnnotation": required_tracking_identity()[0], "transition": transition,
+    })
 
 
 def validate_child(sections: list[tuple[tuple[str, str], list[str]]]) -> None:
@@ -316,7 +469,8 @@ def validate_child(sections: list[tuple[tuple[str, str], list[str]]]) -> None:
 
 
 def validate(mode: str, status: int, stdout: str, stderr: str, expected_path: pathlib.Path | None,
-             expected_checksum: str | None, evidence: Evidence) -> None:
+             expected_checksum: str | None, live_state_path: pathlib.Path | None,
+             transition_path: pathlib.Path | None, evidence: Evidence) -> None:
     evidence.write_text("argocd-diff.txt", sanitize_text(stdout))
     evidence.write_text("argocd-stderr.txt", sanitize_text(stderr))
     evidence.write_json("command-result.json", {"argoExitCode": status, "mode": mode})
@@ -341,21 +495,14 @@ def validate(mode: str, status: int, stdout: str, stderr: str, expected_path: pa
     except (OSError, yaml.YAMLError) as error: raise DiffValidationError(f"unable to parse the approved Application: {error}") from error
     if not isinstance(approved, dict) or protected_checksum(approved) != expected_checksum:
         raise DiffValidationError("approved child specification checksum does not match the protected checksum")
-    proposed = parse_root(sections)
-    normalized_proposed, tracking_decision = normalize_tracking_annotation(approved, proposed)
-    approved, proposed = canonical(approved), canonical(proposed)
-    normalized_proposed = canonical(normalized_proposed)
-    differences = compare(approved, normalized_proposed)
-    evidence.write_json("approved-application.json", approved)
-    evidence.write_json("proposed-application.json", proposed)
-    evidence.write_json("normalization-decisions.json", [tracking_decision])
-    evidence.write_json("differences.json", differences)
-    evidence.complete(status, "mismatch" if differences else "approved_diff")
-    if differences:
-        lines = ["proposed child Application differs from the approved immutable manifest:"]
-        for item in differences:
-            lines.append(f"{item['path']}: {item['state']} ({item['classification']}); expected={json.dumps(item['expected'], sort_keys=True)}; proposed={json.dumps(item['proposed'], sort_keys=True)}")
-        raise DiffValidationError("\n".join(lines))
+    if live_state_path is None or transition_path is None:
+        raise DiffValidationError("root diff requires validated live-state evidence and transition policy")
+    transition = load_transition(transition_path, expected_path, expected_checksum)
+    lifecycle, live, live_record = load_live_state(live_state_path)
+    evidence.write_json("approved-application.json", canonical(approved))
+    evidence.write_json("live-state-evidence.json", live_record)
+    validate_root_lifecycle(sections, approved, lifecycle, live, transition, evidence)
+    evidence.complete(status, "approved_diff")
 
 
 def fixture(identity: tuple[str, str], operation: str, content: str = "kind: ConfigMap") -> str:
@@ -368,6 +515,29 @@ def expect_failure(action, label: str) -> DiffValidationError:
     try: action()
     except DiffValidationError as error: return error
     raise AssertionError(f"{label} was accepted")
+
+
+def lifecycle_record(value: dict[str, Any] | None) -> dict[str, Any]:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")) if value is not None else "null"
+    return {
+        "schemaVersion": 1, "context": "kind-platform-engineering-lab", "namespace": "gitops",
+        "name": "golden-path-api", "state": "present" if value is not None else "absent",
+        "object": value, "objectSha256": hashlib.sha256(encoded.encode()).hexdigest(),
+    }
+
+
+def modification_fixture(old: str, new: str) -> str:
+    return f"""
+===== argoproj.io/Application gitops/golden-path-api ======
+8c8
+<     platform.engineering-lab/chart-revision: {old}
+---
+>     platform.engineering-lab/chart-revision: {new}
+126c126
+<     targetRevision: {old}
+---
+>     targetRevision: {new}
+"""
 
 
 def self_test() -> None:
@@ -394,64 +564,96 @@ def self_test() -> None:
     with tempfile.TemporaryDirectory(prefix="argocd-diff-self-test-") as temporary:
         global EVIDENCE_ROOT
         original_root, EVIDENCE_ROOT = EVIDENCE_ROOT, pathlib.Path(temporary) / "evidence"
-        approved_path = pathlib.Path(temporary) / "approved.yaml"
-        approved_path.write_text(yaml.safe_dump(expected, sort_keys=False), encoding="utf-8")
-        checksum = protected_checksum(expected)
-        tracked = json.loads(json.dumps(expected))
+        approved_path = pathlib.Path(temporary) / "golden-path-api.yaml"
+        source_application = ROOT / "environments/local/gitops/applications/golden-path-api.yaml"
+        source_evidence = ROOT / "environments/local/gitops/evidence/golden-path-api.json"
+        approved_path.write_bytes(source_application.read_bytes())
+        approved_path.with_name("golden-path-api.json").write_bytes(source_evidence.read_bytes())
+        approved = yaml.safe_load(approved_path.read_text(encoding="utf-8"))
+        checksum = protected_checksum(approved)
+        transition_path = ROOT / "config/gitops/root-diff-transition.json"
+        tracked = json.loads(json.dumps(approved))
         tracked.setdefault("metadata", {}).setdefault("annotations", {})[TRACKING_ANNOTATION] = required_tracking_identity()[0]
-        output = fixture(ROOT_IDENTITY, "a", yaml.safe_dump(tracked, sort_keys=False).rstrip())
-        validate("root", 20, output, "", approved_path, checksum, Evidence(EVIDENCE_ROOT / "1-1-1-root"))
-        decision = json.loads((EVIDENCE_ROOT / "1-1-1-root/normalization-decisions.json").read_text(encoding="utf-8"))[0]
-        assert decision["value"] == required_tracking_identity()[0]
-        assert protected_checksum(tracked) == checksum
-        changed = json.loads(json.dumps(tracked)); changed["spec"]["project"] = "other"
-        error = expect_failure(lambda: validate("root", 20, fixture(ROOT_IDENTITY, "a", yaml.safe_dump(changed).rstrip()), "", approved_path, checksum, Evidence(EVIDENCE_ROOT / "2-1-1-root")), "changed project")
-        assert "/spec/project" in str(error)
-        operational = expect_failure(lambda: validate("root", 2, "", "authorization: Bearer private", approved_path, checksum, Evidence(EVIDENCE_ROOT / "3-1-1-root")), "operational failure")
+        absent_path = pathlib.Path(temporary) / "absent.json"
+        absent_path.write_text(json.dumps(lifecycle_record(None)), encoding="utf-8")
+        creation = fixture(ROOT_IDENTITY, "a", yaml.safe_dump(tracked, sort_keys=False).rstrip())
+        validate("root", 20, creation, "", approved_path, checksum, absent_path, transition_path, Evidence(EVIDENCE_ROOT / "1-1-1-root"))
+        decision = json.loads((EVIDENCE_ROOT / "1-1-1-root/lifecycle-decision.json").read_text(encoding="utf-8"))
+        assert decision["mode"] == "initial_creation"
+        old, new = EXPECTED_TRANSITION["previousChartRevision"], EXPECTED_TRANSITION["newChartRevision"]
+        live = json.loads(json.dumps(tracked))
+        live["metadata"]["annotations"]["platform.engineering-lab/chart-revision"] = old
+        live["spec"]["source"]["targetRevision"] = old
+        present_path = pathlib.Path(temporary) / "present.json"
+        present_path.write_text(json.dumps(lifecycle_record(live)), encoding="utf-8")
+        modification = modification_fixture(old, new)
+        validate("root", 20, modification, "", approved_path, checksum, present_path, transition_path, Evidence(EVIDENCE_ROOT / "2-1-1-root"))
+        lifecycle = json.loads((EVIDENCE_ROOT / "2-1-1-root/lifecycle-decision.json").read_text(encoding="utf-8"))
+        assert lifecycle["mode"] == "post_bootstrap_modification"
+        expect_failure(lambda: validate("root", 0, "", "", approved_path, checksum, present_path, transition_path, Evidence(EVIDENCE_ROOT / "3-1-1-root")), "repeated idempotent state")
+        backward_live = json.loads(json.dumps(tracked))
+        backward_path = pathlib.Path(temporary) / "backward.json"
+        backward_path.write_text(json.dumps(lifecycle_record(backward_live)), encoding="utf-8")
+        expect_failure(lambda: validate("root", 20, modification_fixture(new, old), "", approved_path, checksum, backward_path, transition_path, Evidence(EVIDENCE_ROOT / "4-1-1-root")), "backward transition")
+        changed = json.loads(json.dumps(live)); changed["spec"]["project"] = "other"
+        changed_path = pathlib.Path(temporary) / "changed.json"
+        changed_path.write_text(json.dumps(lifecycle_record(changed)), encoding="utf-8")
+        expect_failure(lambda: validate("root", 20, modification, "", approved_path, checksum, changed_path, transition_path, Evidence(EVIDENCE_ROOT / "5-1-1-root")), "unexpected field change")
+        expect_failure(lambda: validate("root", 20, creation, "", approved_path, checksum, present_path, transition_path, Evidence(EVIDENCE_ROOT / "6-1-1-root")), "creation against existing child")
+        expect_failure(lambda: validate("root", 20, modification, "", approved_path, checksum, absent_path, transition_path, Evidence(EVIDENCE_ROOT / "7-1-1-root")), "modification against absent child")
+        deletion = fixture(ROOT_IDENTITY, "d", yaml.safe_dump(tracked, sort_keys=False).rstrip())
+        expect_failure(lambda: validate("root", 20, deletion, "", approved_path, checksum, present_path, transition_path, Evidence(EVIDENCE_ROOT / "8-1-1-root")), "child deletion")
+        mixed = modification + fixture(("/ConfigMap", "gitops/unexpected"), "a")
+        expect_failure(lambda: validate("root", 20, mixed, "", approved_path, checksum, present_path, transition_path, Evidence(EVIDENCE_ROOT / "9-1-1-root")), "mixed-resource diff")
+        tampered = lifecycle_record(live); tampered["objectSha256"] = "0" * 64
+        tampered_path = pathlib.Path(temporary) / "tampered.json"
+        tampered_path.write_text(json.dumps(tampered), encoding="utf-8")
+        expect_failure(lambda: validate("root", 20, modification, "", approved_path, checksum, tampered_path, transition_path, Evidence(EVIDENCE_ROOT / "10-1-1-root")), "tampered live state")
+        operational = expect_failure(lambda: validate("root", 2, "", "authorization: Bearer private", approved_path, checksum, present_path, transition_path, Evidence(EVIDENCE_ROOT / "11-1-1-root")), "operational failure")
         assert operational.exit_code == 2 and "private" not in str(operational)
-        for index, altered in enumerate((
+        for altered in (
             "other:argoproj.io/Application:gitops/golden-path-api",
             "platform-environment:other/Application:gitops/golden-path-api",
             "platform-environment:argoproj.io/Other:gitops/golden-path-api",
             "platform-environment:argoproj.io/Application:other/golden-path-api",
             "platform-environment:argoproj.io/Application:gitops/other",
             "platform-environment::argoproj.io/Application:gitops/golden-path-api",
-        ), start=5):
+        ):
             malformed = json.loads(json.dumps(tracked)); malformed["metadata"]["annotations"][TRACKING_ANNOTATION] = altered
-            expect_failure(lambda value=malformed, number=index: validate("root", 20, fixture(ROOT_IDENTITY, "a", yaml.safe_dump(value).rstrip()), "", approved_path, checksum, Evidence(EVIDENCE_ROOT / f"{number}-1-1-root")), "malformed tracking identity")
-        expect_failure(lambda: normalize_tracking_annotation(expected, expected), "missing tracking annotation")
-        repository_supplied = json.loads(json.dumps(expected)); repository_supplied.setdefault("metadata", {}).setdefault("annotations", {})[TRACKING_ANNOTATION] = required_tracking_identity()[0]
+            expect_failure(lambda value=malformed: protected_application(value, True), "malformed tracking identity")
+        expect_failure(lambda: normalize_tracking_annotation(approved, approved), "missing tracking annotation")
+        repository_supplied = json.loads(json.dumps(approved)); repository_supplied.setdefault("metadata", {}).setdefault("annotations", {})[TRACKING_ANNOTATION] = required_tracking_identity()[0]
         expect_failure(lambda: normalize_tracking_annotation(repository_supplied, tracked), "repository-supplied tracking annotation")
-        unrelated = json.loads(json.dumps(tracked)); unrelated["metadata"].setdefault("labels", {})["unexpected"] = "value"
-        expect_failure(lambda: validate("root", 20, fixture(ROOT_IDENTITY, "a", yaml.safe_dump(unrelated).rstrip()), "", approved_path, checksum, Evidence(EVIDENCE_ROOT / "11-1-1-root")), "unrelated metadata")
         duplicate_yaml = yaml.safe_dump(tracked, sort_keys=False).rstrip()
         tracking_line = next(line for line in duplicate_yaml.splitlines() if TRACKING_ANNOTATION in line)
         duplicate_yaml = duplicate_yaml.replace(tracking_line, f"{tracking_line}\n{tracking_line}")
-        expect_failure(lambda: parse_root(split_sections(fixture(ROOT_IDENTITY, "a", duplicate_yaml))), "multiple tracking annotations")
+        expect_failure(lambda: parse_root_creation(split_sections(fixture(ROOT_IDENTITY, "a", duplicate_yaml))), "multiple tracking annotations")
         expect_failure(lambda: Evidence(EVIDENCE_ROOT / "../unsafe"), "unsafe evidence traversal")
         cross_namespace = fixture(("networking.k8s.io/NetworkPolicy", "observability/nope"), "a")
-        error = expect_failure(lambda: validate("child", 20, cross_namespace, "", None, None, Evidence(EVIDENCE_ROOT / "13-1-1-child")), "cross-namespace child resource")
+        error = expect_failure(lambda: validate("child", 20, cross_namespace, "", None, None, None, None, Evidence(EVIDENCE_ROOT / "13-1-1-child")), "cross-namespace child resource")
         assert "outside platform-apps" in str(error)
         incomplete = Evidence(EVIDENCE_ROOT / "12-1-1-root")
         incomplete.write_text("argocd-diff.txt", "safe")
         (incomplete.destination / "unexpected").mkdir()
         expect_failure(lambda: incomplete.complete(20, "approved_diff"), "incomplete or unsafe evidence")
         EVIDENCE_ROOT = original_root
-    print("PASS  Argo diff diagnostics canonicalize nested state, classify every mismatch, redact secrets, and retain atomic evidence.")
+    print("PASS  Argo diff lifecycle validates initial creation and exact post-bootstrap chart transitions from checksummed live state.")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true"); parser.add_argument("--mode", choices=("root", "child"))
     parser.add_argument("--exit-code", type=int); parser.add_argument("--stdout", type=pathlib.Path); parser.add_argument("--stderr", type=pathlib.Path)
-    parser.add_argument("--expected", type=pathlib.Path); parser.add_argument("--expected-checksum"); parser.add_argument("--evidence-dir", type=pathlib.Path)
+    parser.add_argument("--expected", type=pathlib.Path); parser.add_argument("--expected-checksum")
+    parser.add_argument("--live-state", type=pathlib.Path); parser.add_argument("--transition", type=pathlib.Path)
+    parser.add_argument("--evidence-dir", type=pathlib.Path)
     args = parser.parse_args()
     evidence = None
     try:
         if args.self_test: self_test(); return 0
         if None in (args.mode, args.exit_code, args.stdout, args.stderr, args.evidence_dir): raise DiffValidationError("mode, exit-code, stdout, stderr, and evidence-dir are required")
         evidence = Evidence(args.evidence_dir)
-        validate(args.mode, args.exit_code, args.stdout.read_text(encoding="utf-8"), args.stderr.read_text(encoding="utf-8"), args.expected, args.expected_checksum, evidence)
+        validate(args.mode, args.exit_code, args.stdout.read_text(encoding="utf-8"), args.stderr.read_text(encoding="utf-8"), args.expected, args.expected_checksum, args.live_state, args.transition, evidence)
         print(f"PASS  guarded {args.mode} diff contains only the approved resource changes.\nEvidence: {args.evidence_dir}"); return 0
     except (DiffValidationError, OSError, UnicodeError, json.JSONDecodeError) as error:
         if evidence is not None and not evidence.completed:

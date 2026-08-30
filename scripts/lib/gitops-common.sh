@@ -26,6 +26,7 @@ ARGOCD_API_POLICY_TEMPLATE=$ARGOCD_CONFIG/api-endpoint-policies.yaml.tpl
 ARGOCD_CLI_INSTALLER=$REPOSITORY_ROOT/scripts/argocd-cli.py
 ARGOCD_CORE_RUNNER=$REPOSITORY_ROOT/scripts/argocd-core.py
 ARGOCD_DIFF_VALIDATOR=$REPOSITORY_ROOT/scripts/validate-argocd-diff.py
+ARGOCD_ROOT_DIFF_TRANSITION=$REPOSITORY_ROOT/config/gitops/root-diff-transition.json
 
 resolve_argocd_api_endpoint() {
   destination=$1
@@ -139,7 +140,8 @@ run_guarded_argocd_diff() (
   diff_expected=$2
   diff_expected_checksum=$3
   diff_directory=$4
-  shift 4
+  diff_live_state=$5
+  shift 5
   diff_stdout=$diff_directory/argocd-$diff_mode-diff.stdout
   diff_stderr=$diff_directory/argocd-$diff_mode-diff.stderr
   diff_nonce=$(printf '%s' "$diff_directory" | cksum | awk '{print $1}')
@@ -150,7 +152,8 @@ run_guarded_argocd_diff() (
     diff_validation_status=0
     python3 "$ARGOCD_DIFF_VALIDATOR" --mode "$diff_mode" --exit-code "$diff_exit" \
       --stdout "$diff_stdout" --stderr "$diff_stderr" --expected "$diff_expected" \
-      --expected-checksum "$diff_expected_checksum" --evidence-dir "$diff_evidence" || diff_validation_status=$?
+      --expected-checksum "$diff_expected_checksum" --live-state "$diff_live_state" \
+      --transition "$ARGOCD_ROOT_DIFF_TRANSITION" --evidence-dir "$diff_evidence" || diff_validation_status=$?
   else
     diff_validation_status=0
     python3 "$ARGOCD_DIFF_VALIDATOR" --mode "$diff_mode" --exit-code "$diff_exit" \

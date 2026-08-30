@@ -168,6 +168,37 @@ prepare_environment_revision() {
   digest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["imageDigest"])' "$evidence")
 }
 
+capture_child_lifecycle_state() (
+  gitops_lifecycle_destination=$1
+  gitops_lifecycle_object=$gitops_lifecycle_destination/live-child-object.json
+  gitops_lifecycle_state=$gitops_lifecycle_destination/live-child-state.json
+  if kubectl_lab get application "$ARGOCD_APPLICATION" --namespace "$ARGOCD_NAMESPACE" \
+    --ignore-not-found -o json >"$gitops_lifecycle_object"; then
+    :
+  else
+    die 'Unable to resolve the child Application lifecycle state.'
+  fi
+  python3 - "$gitops_lifecycle_object" "$gitops_lifecycle_state" "$EXPECTED_CONTEXT" "$ARGOCD_NAMESPACE" "$ARGOCD_APPLICATION" <<'PY'
+import hashlib, json, pathlib, sys
+source, destination, context, namespace, name = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), *sys.argv[3:]
+text = source.read_text(encoding="utf-8").strip()
+value = json.loads(text) if text else None
+state = "present" if value is not None else "absent"
+if value is not None:
+    if value.get("apiVersion") != "argoproj.io/v1alpha1" or value.get("kind") != "Application":
+        raise SystemExit("unexpected live child API identity")
+    metadata = value.get("metadata", {})
+    if metadata.get("name") != name or metadata.get("namespace") != namespace:
+        raise SystemExit("unexpected live child object identity")
+canonical = json.dumps(value, sort_keys=True, separators=(",", ":")) if value is not None else "null"
+record = {
+    "schemaVersion": 1, "context": context, "namespace": namespace, "name": name,
+    "state": state, "object": value, "objectSha256": hashlib.sha256(canonical.encode()).hexdigest(),
+)
+destination.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+PY
+}
+
 root_diff() {
   require_lab_runtime
   require_argocd_cli
@@ -175,8 +206,9 @@ root_diff() {
   temporary=$(mktemp -d)
   trap 'rm -rf "$temporary"' EXIT HUP INT TERM
   prepare_environment_revision "$temporary"
+  capture_child_lifecycle_state "$temporary"
   printf 'Environment revision: %s\nChild specification SHA-256: %s\n' "$environment_revision" "$child_spec_checksum"
-  run_guarded_argocd_diff root "$application" "$child_spec_checksum" "$temporary" \
+  run_guarded_argocd_diff root "$application" "$child_spec_checksum" "$temporary" "$temporary/live-child-state.json" \
     app diff "$ARGOCD_ROOT_APPLICATION" --revision "$environment_revision"
 }
 
@@ -187,6 +219,7 @@ root_sync() {
   temporary=$(mktemp -d)
   trap 'rm -rf "$temporary"' EXIT HUP INT TERM
   prepare_environment_revision "$temporary"
+  capture_child_lifecycle_state "$temporary"
   root_repo=$(kubectl_lab get application "$ARGOCD_ROOT_APPLICATION" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.spec.source.repoURL}')
   root_revision=$(kubectl_lab get application "$ARGOCD_ROOT_APPLICATION" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.spec.source.targetRevision}')
   root_path=$(kubectl_lab get application "$ARGOCD_ROOT_APPLICATION" --namespace "$ARGOCD_NAMESPACE" -o jsonpath='{.spec.source.path}')
@@ -196,7 +229,7 @@ root_sync() {
   fi
   printf '%s\n' 'Stage 1 changes only the child Application specification in gitops. It does not synchronize or prune workload resources.'
   printf 'Environment revision: %s\nChild specification SHA-256: %s\n' "$environment_revision" "$child_spec_checksum"
-  run_guarded_argocd_diff root "$application" "$child_spec_checksum" "$temporary" \
+  run_guarded_argocd_diff root "$application" "$child_spec_checksum" "$temporary" "$temporary/live-child-state.json" \
     app diff "$ARGOCD_ROOT_APPLICATION" --revision "$environment_revision"
   require_environment_revision_current "$environment_revision"
   confirmation=$EXPECTED_CONTEXT/$ARGOCD_ROOT_APPLICATION/$environment_revision/$chart_revision/$image_revision/$digest/sha256:$child_spec_checksum
@@ -220,7 +253,7 @@ app_diff() {
   require_argocd_application
   temporary=$(mktemp -d)
   trap 'rm -rf "$temporary"' EXIT HUP INT TERM
-  run_guarded_argocd_diff child '' '' "$temporary" app diff "$ARGOCD_APPLICATION"
+  run_guarded_argocd_diff child '' '' "$temporary" '' app diff "$ARGOCD_APPLICATION"
 }
 
 app_sync() {
@@ -245,7 +278,7 @@ app_sync() {
   printf '%s\n' 'Stage 2 changes only resources owned by the child Application. Pruning remains disabled.'
   temporary=$(mktemp -d)
   trap 'rm -rf "$temporary"' EXIT HUP INT TERM
-  run_guarded_argocd_diff child '' '' "$temporary" app diff "$ARGOCD_APPLICATION"
+  run_guarded_argocd_diff child '' '' "$temporary" '' app diff "$ARGOCD_APPLICATION"
   confirmation=$EXPECTED_CONTEXT/$ARGOCD_APPLICATION/$chart_revision/$image_revision/$digest
   confirm_exact "$confirmation" "Synchronize only child Application '$ARGOCD_APPLICATION'."
   run_argocd_core app sync "$ARGOCD_APPLICATION" --revision "$chart_revision" --prune=false
