@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import subprocess
 import sys
@@ -52,6 +53,27 @@ def changed_paths(base: str, head: str) -> list[str]:
     return [line for line in result.stdout.splitlines() if line]
 
 
+def valid_revision(value: str) -> bool:
+    return len(value) == 40 and all(character in "0123456789abcdef" for character in value)
+
+
+def chart_matches_approved_revision(approved_revision: str, head: str) -> bool:
+    if not valid_revision(approved_revision) or not valid_revision(head):
+        raise SystemExit("approved chart revision and head must be complete lowercase Git SHAs")
+    subprocess.run(["git", "cat-file", "-e", f"{approved_revision}^{{commit}}"], check=True)
+    result = subprocess.run(
+        ["git", "diff", "--quiet", approved_revision, head, "--", *CHART_INPUTS],
+        check=False,
+    )
+    if result.returncode not in (0, 1):
+        raise SystemExit("unable to compare the approved and current chart trees")
+    return result.returncode == 0
+
+
+def chart_promotion_required(category: str, approved_chart_matches: bool) -> bool:
+    return category == "chart-impacting-only" and not approved_chart_matches
+
+
 def self_test() -> None:
     cases = {
         "application source": (["applications/golden-path-api/src/golden_path_api/main.py"], "image-impacting"),
@@ -64,6 +86,9 @@ def self_test() -> None:
     }
     for name, (paths, expected) in cases.items():
         assert classify(paths) == expected, name
+    assert chart_promotion_required("chart-impacting-only", False)
+    assert not chart_promotion_required("chart-impacting-only", True)
+    assert not chart_promotion_required("desired-state-only", False)
     print("PASS  image, chart, desired-state, unrelated, and mixed change classification is correct.")
 
 
@@ -73,6 +98,7 @@ def main() -> None:
     parser.add_argument("--base")
     parser.add_argument("--head")
     parser.add_argument("--github-output", type=pathlib.Path)
+    parser.add_argument("--evidence", type=pathlib.Path)
     args = parser.parse_args()
     if args.self_test:
         self_test()
@@ -81,6 +107,15 @@ def main() -> None:
         parser.error("--base and --head are required")
     paths = changed_paths(args.base, args.head)
     category = classify(paths)
+    approved_chart_matches = False
+    if category == "chart-impacting-only" and args.evidence:
+        try:
+            evidence = json.loads(args.evidence.read_text(encoding="utf-8"))
+            approved_revision = evidence["chartRevision"]
+        except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+            raise SystemExit(f"unable to resolve approved chart revision: {error}") from error
+        approved_chart_matches = chart_matches_approved_revision(approved_revision, args.head)
+    chart_required = chart_promotion_required(category, approved_chart_matches)
     print(f"Change category: {category}")
     for path in paths:
         print(f"- {path}")
@@ -88,7 +123,7 @@ def main() -> None:
         with args.github_output.open("a", encoding="utf-8") as output:
             output.write(f"category={category}\n")
             output.write(f"image_required={'true' if category == 'image-impacting' else 'false'}\n")
-            output.write(f"chart_required={'true' if category == 'chart-impacting-only' else 'false'}\n")
+            output.write(f"chart_required={'true' if chart_required else 'false'}\n")
             output.write(f"chart_changed={'true' if any(affects(path, CHART_INPUTS) for path in paths) else 'false'}\n")
 
 

@@ -214,6 +214,7 @@ def validate_workflow() -> None:
     assert "pull_request_target" not in text
     assert "packages: write" not in text
     assert "./scripts/detect-image-impact.py" in text
+    assert "--evidence environments/local/gitops/evidence/golden-path-api.json" in text
     assert "contents: write" in text and "pull-requests: write" in text
     assert "chart-promotion:" in text
     assert "chart_changed" in text

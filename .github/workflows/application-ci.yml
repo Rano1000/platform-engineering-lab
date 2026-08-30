@@ -51,7 +51,9 @@ jobs:
           else
             base=$(git rev-parse HEAD^)
           fi
-          ./scripts/detect-image-impact.py --base "$base" --head "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"
+          ./scripts/detect-image-impact.py --base "$base" --head "$GITHUB_SHA" \
+            --evidence environments/local/gitops/evidence/golden-path-api.json \
+            --github-output "$GITHUB_OUTPUT"
       - name: Resolve safe image-build decision
         id: decision
         env:
