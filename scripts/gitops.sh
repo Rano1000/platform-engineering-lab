@@ -313,7 +313,9 @@ case ${1:-} in
   uninstall) uninstall_gitops ;;
   self-test-lifecycle)
     [ "${PLATFORM_LAB_SELF_TEST:-}" = 1 ] || die 'Lifecycle fixture entry point is restricted to repository self-tests.'
-    [ "$#" -eq 2 ] && [ -f "${GITOPS_LIFECYCLE_FIXTURE:-}" ] || die 'Lifecycle fixture input and output are required.'
+    if [ "$#" -ne 2 ] || [ ! -f "${GITOPS_LIFECYCLE_FIXTURE:-}" ]; then
+      die 'Lifecycle fixture input and output are required.'
+    fi
     kubectl_lab() { cat -- "$GITOPS_LIFECYCLE_FIXTURE"; }
     mkdir -p -- "$2"
     capture_child_lifecycle_state "$2"
