@@ -222,7 +222,9 @@ if printf '%s\n' "$ant_image_ids" | grep -Ev '@sha256:[0-9a-f]{64}$' >/dev/null;
 fi
 ant_worker=$(kubectl_lab get nodes -l '!node-role.kubernetes.io/control-plane' -o jsonpath='{.items[0].metadata.name}')
 ant_other_worker=$(kubectl_lab get nodes -l '!node-role.kubernetes.io/control-plane' -o jsonpath='{.items[1].metadata.name}')
-[ -n "$ant_worker" ] && [ -n "$ant_other_worker" ] || die 'Two worker nodes are required.'
+if [ -z "$ant_worker" ] || [ -z "$ant_other_worker" ]; then
+  die 'Two worker nodes are required.'
+fi
 ant_service_ip=$(kubectl_lab get service "$APP_SERVICE" --namespace "$APP_NAMESPACE" -o jsonpath='{.spec.clusterIP}')
 ant_app_pod_ip=$(kubectl_lab get pod --namespace "$APP_NAMESPACE" -l app.kubernetes.io/name=golden-path-api \
   -o jsonpath='{.items[0].status.podIP}')
