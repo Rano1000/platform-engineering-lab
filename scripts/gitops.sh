@@ -133,6 +133,7 @@ reconcile_api_policies() (
   gitops_policy_temporary=$(mktemp -d)
   python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-dir \
     --base "$gitops_policy_base" --root "$gitops_policy_evidence" --path "$gitops_policy_evidence"
+  # shellcheck disable=SC2317 # This callback is invoked indirectly by EXIT and signal traps.
   gitops_policy_finish() {
     gitops_policy_status=$?
     trap - EXIT HUP INT TERM
