@@ -122,6 +122,96 @@ install_gitops() {
   verify_live_argocd_api_policies "$temporary/snapshot-c-identity.json" "$temporary/live-after.json"
 }
 
+reconcile_api_policies() (
+  require_lab_runtime
+  require_command docker
+  require_clean_synchronized_repository
+  gitops_policy_validator=$SCRIPT_DIR/reconcile-argocd-api-policies.py
+  gitops_policy_run=$(date +%s)-$$
+  gitops_policy_base=$REPOSITORY_ROOT/.artifacts/gitops-api-policy-reconcile
+  gitops_policy_evidence=$gitops_policy_base/$gitops_policy_run
+  gitops_policy_temporary=$(mktemp -d)
+  python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-dir \
+    --base "$gitops_policy_base" --root "$gitops_policy_evidence" --path "$gitops_policy_evidence"
+  gitops_policy_finish() {
+    gitops_policy_status=$?
+    trap - EXIT HUP INT TERM
+    set +e
+    if find "$gitops_policy_evidence" -type l -o ! -type d ! -type f | grep . >/dev/null 2>&1; then
+      printf 'FAIL  policy reconciliation evidence contains an unsafe path.\n' >&2
+      gitops_policy_status=1
+    else
+      find "$gitops_policy_evidence" -type f ! -name evidence-manifest.json -print0 |
+        xargs -0 python3 "$SCRIPT_DIR/redact-network-diagnostics.py" || gitops_policy_status=1
+      python3 "$gitops_policy_validator" finalize-evidence --root "$gitops_policy_evidence" || gitops_policy_status=1
+    fi
+    rm -rf "$gitops_policy_temporary"
+    exit "$gitops_policy_status"
+  }
+  trap gitops_policy_finish EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  gitops_policy_identity_a=$(resolve_argocd_api_endpoint "$gitops_policy_temporary" snapshot-a)
+  cp "$gitops_policy_temporary/snapshot-a-identity.json" "$gitops_policy_evidence/snapshot-a-identity.json"
+  cp "$gitops_policy_temporary/snapshot-a-policies.yaml" "$gitops_policy_evidence/rendered-policies.yaml"
+  kubectl_lab get networkpolicy argocd-redis-secret-init-api argocd-application-controller-api \
+    argocd-server-api --namespace "$ARGOCD_NAMESPACE" --show-managed-fields=true -o json \
+    >"$gitops_policy_evidence/live-a.json"
+  python3 "$gitops_policy_validator" plan --identity "$gitops_policy_evidence/snapshot-a-identity.json" \
+    --desired "$gitops_policy_evidence/rendered-policies.yaml" --live "$gitops_policy_evidence/live-a.json" \
+    --output "$gitops_policy_evidence" >"$gitops_policy_evidence/approved-diff.json"
+  gitops_policy_state=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["state"])' "$gitops_policy_evidence/plan.json")
+  if [ "$gitops_policy_state" = current ]; then
+    printf 'PASS  all three Argo API policies already match %s; no resource was changed.\n' "$gitops_policy_identity_a"
+    exit 0
+  fi
+  gitops_policy_old=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["oldIdentityChecksum"])' "$gitops_policy_evidence/plan.json")
+  gitops_policy_new=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["newIdentityChecksum"])' "$gitops_policy_evidence/plan.json")
+  gitops_policy_expected_checksum=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["desiredPolicyChecksum"])' "$gitops_policy_evidence/plan.json")
+  [ "$gitops_policy_identity_a" = "$gitops_policy_new" ] || die 'Rendered policy identity differs from snapshot A.'
+  printf 'Policy reconciliation plan (expected normalized checksum %s):\n' "$gitops_policy_expected_checksum"
+  cat "$gitops_policy_evidence/approved-diff.json"
+
+  resolve_argocd_api_endpoint "$gitops_policy_temporary" snapshot-b >/dev/null
+  cp "$gitops_policy_temporary/snapshot-b-identity.json" "$gitops_policy_evidence/snapshot-b-identity.json"
+  compare_argocd_api_snapshots "$gitops_policy_evidence/snapshot-a-identity.json" "$gitops_policy_evidence/snapshot-b-identity.json"
+  kubectl_lab get networkpolicy argocd-redis-secret-init-api argocd-application-controller-api \
+    argocd-server-api --namespace "$ARGOCD_NAMESPACE" --show-managed-fields=true -o json \
+    >"$gitops_policy_evidence/live-b.json"
+  python3 "$gitops_policy_validator" verify-pre --plan "$gitops_policy_evidence/plan.json" \
+    --live "$gitops_policy_evidence/live-b.json"
+  gitops_policy_confirmation=$EXPECTED_CONTEXT/argocd-api-endpoint-policies/$gitops_policy_old/$gitops_policy_new
+  confirm_exact "$gitops_policy_confirmation" \
+    'Update only the three existing exact Argo API endpoint NetworkPolicies; Helm and Applications are untouched.'
+
+  require_environment_revision_current "$environment_revision"
+  resolve_argocd_api_endpoint "$gitops_policy_temporary" snapshot-confirmed >/dev/null
+  cp "$gitops_policy_temporary/snapshot-confirmed-identity.json" "$gitops_policy_evidence/snapshot-confirmed-identity.json"
+  compare_argocd_api_snapshots "$gitops_policy_evidence/snapshot-a-identity.json" "$gitops_policy_evidence/snapshot-confirmed-identity.json"
+  kubectl_lab get networkpolicy argocd-redis-secret-init-api argocd-application-controller-api \
+    argocd-server-api --namespace "$ARGOCD_NAMESPACE" --show-managed-fields=true -o json \
+    >"$gitops_policy_evidence/live-confirmed.json"
+  python3 "$gitops_policy_validator" verify-pre --plan "$gitops_policy_evidence/plan.json" \
+    --live "$gitops_policy_evidence/live-confirmed.json"
+  python3 "$gitops_policy_validator" apply --plan "$gitops_policy_evidence/plan.json" \
+    --evidence "$gitops_policy_evidence" --kubectl "$(command -v kubectl)" --context "$EXPECTED_CONTEXT"
+
+  resolve_argocd_api_endpoint "$gitops_policy_temporary" snapshot-c >/dev/null
+  cp "$gitops_policy_temporary/snapshot-c-identity.json" "$gitops_policy_evidence/snapshot-c-identity.json"
+  compare_argocd_api_snapshots "$gitops_policy_evidence/snapshot-b-identity.json" "$gitops_policy_evidence/snapshot-c-identity.json"
+  kubectl_lab get networkpolicy argocd-redis-secret-init-api argocd-application-controller-api \
+    argocd-server-api --namespace "$ARGOCD_NAMESPACE" --show-managed-fields=true -o json \
+    >"$gitops_policy_evidence/live-after.json"
+  gitops_policy_actual_checksum=$(python3 "$gitops_policy_validator" verify-after \
+    --plan "$gitops_policy_evidence/plan.json" --identity "$gitops_policy_evidence/snapshot-c-identity.json" \
+    --live "$gitops_policy_evidence/live-after.json")
+  [ "$gitops_policy_actual_checksum" = "$gitops_policy_expected_checksum" ] || die 'Final live policy checksum differs from the reviewed plan.'
+  printf 'PASS  reconciled exactly three Argo API policies; live checksum %s. Evidence: %s\n' \
+    "$gitops_policy_actual_checksum" "$gitops_policy_evidence"
+)
+
 bootstrap_gitops() {
   require_lab_runtime
   helm --kube-context "$EXPECTED_CONTEXT" status "$ARGOCD_RELEASE" --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1 ||
@@ -294,12 +384,13 @@ uninstall_gitops() {
 }
 
 usage() {
-  printf 'usage: %s {install|harden-default-project|bootstrap|status|root-status|root-diff|root-sync|app-status|app-diff|app-sync|validate|uninstall}\n' "$0" >&2
+  printf 'usage: %s {install|reconcile-api-policies|harden-default-project|bootstrap|status|root-status|root-diff|root-sync|app-status|app-diff|app-sync|validate|uninstall}\n' "$0" >&2
   exit 2
 }
 
 case ${1:-} in
   install) install_gitops ;;
+  reconcile-api-policies) reconcile_api_policies ;;
   harden-default-project) harden_default_project_guarded ;;
   bootstrap) bootstrap_gitops ;;
   status) status_gitops ;;

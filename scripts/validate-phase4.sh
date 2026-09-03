@@ -35,6 +35,9 @@ python3 scripts/update-chart-promotion.py --self-test
 python3 scripts/validate-reconciliation.py --self-test
 python3 scripts/validate-app-image.py --self-test
 python3 scripts/resolve-kubernetes-api.py self-test
+python3 scripts/reconcile-argocd-api-policies.py self-test
+python3 scripts/validate-argocd-workload.py --self-test
+python3 scripts/test-api-policy-reconcile.py
 python3 scripts/network-probe.py self-test
 python3 scripts/app-network-probe.py self-test
 python3 scripts/validate-diagnostic-path.py self-test

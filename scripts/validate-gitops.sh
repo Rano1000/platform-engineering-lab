@@ -30,10 +30,22 @@ else
   fail 'Redis initialization Secret is missing; verify hook access to Kubernetes API TCP 443.'
 fi
 for workload in deployment/argocd-server deployment/argocd-repo-server statefulset/argocd-application-controller deployment/argocd-redis; do
-  if kubectl_lab rollout status "$workload" --namespace "$ARGOCD_NAMESPACE" --timeout=30s >/dev/null 2>&1; then
-    pass "$workload is Ready."
+  workload_name=${workload#*/}
+  workload_file=$temporary/$workload_name-workload.json
+  pods_before=$temporary/$workload_name-pods-before.json
+  pods_after=$temporary/$workload_name-pods-after.json
+  if kubectl_lab get "$workload" --namespace "$ARGOCD_NAMESPACE" -o json >"$workload_file" &&
+    kubectl_lab get pods --namespace "$ARGOCD_NAMESPACE" -l "app.kubernetes.io/name=$workload_name" -o json >"$pods_before"; then
+    sleep 1
+    if kubectl_lab get pods --namespace "$ARGOCD_NAMESPACE" -l "app.kubernetes.io/name=$workload_name" -o json >"$pods_after" &&
+      python3 "$SCRIPT_DIR/validate-argocd-workload.py" --workload "$workload_file" \
+        --previous-pods "$pods_before" --pods "$pods_after" >/dev/null 2>&1; then
+      pass "$workload and all selected Pods are Ready without restart growth."
+    else
+      fail "$workload has an unready, unhealthy, stale, or restarting Pod."
+    fi
   else
-    fail "$workload is not Ready."
+    fail "$workload or its selected Pods could not be inspected."
   fi
 done
 control_plane=$(kubectl_lab get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[0].metadata.name}')

@@ -31,6 +31,8 @@ Controller installation retains Argo CD's built-in `default` AppProject but repl
 
 The application controller uses Argo CD's `resource.respectRBAC: normal` cache mode. It watches only resources its exact Kubernetes RBAC permits and stops watching unrelated APIs after an authorization denial. This avoids granting cluster-wide read visibility or maintaining a growing exclusion list as CRDs change.
 
+The three API endpoint policies are runtime-bound infrastructure state rather than static environment desired state. kind may change a retained control-plane container's bridge address after Docker restarts. A dedicated policy-only transaction verifies Service, EndpointSlice, node, kube-apiserver, container, and Docker-network identities before changing the exact `/32` on only the approved Argo API consumers. It cannot invoke Helm or Application reconciliation.
+
 Synchronization has two manual stages. First, the root diff updates only the child Application specification. Second, a separate child diff updates workload resources. Automatic synchronization, self-healing, pruning, cascading-deletion finalizers, and namespace creation are absent at both levels.
 
 Three revisions have separate meanings:

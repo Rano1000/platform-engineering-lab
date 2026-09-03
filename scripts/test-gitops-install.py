@@ -44,6 +44,7 @@ def main():
     subprocess.run(["python3", str(ROOT / "scripts/capture-gitops-install-failure.py"), "--self-test"], check=True)
     subprocess.run(["python3", str(ROOT / "scripts/validate-default-appproject.py"), "self-test"], check=True)
     subprocess.run(["python3", str(ROOT / "scripts/check-optional-argo-application.py"), "--self-test"], check=True)
+    subprocess.run(["python3", str(ROOT / "scripts/validate-argocd-workload.py"), "--self-test"], check=True)
     print("PASS  Argo installation uses one atomic, waited, non-retried Helm execution with a fixed 15-minute timeout and failure diagnostics.")
 
 

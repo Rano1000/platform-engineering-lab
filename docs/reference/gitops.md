@@ -25,6 +25,7 @@ Steady-state requests total approximately 275m CPU and 704Mi memory. Combined li
 ## Commands
 
 - `make gitops-install`: guarded controller installation; cluster-scoped CRDs and RBAC are created.
+- `make gitops-api-policy-reconcile`: reconcile only the three existing exact API endpoint policies after verified kind endpoint drift.
 - `make gitops-default-project-harden`: guarded, idempotent replacement of only the built-in `default` AppProject with the repository-owned deny-all specification.
 - `make gitops-bootstrap`: one-time manual application of both projects and the root Application.
 - `make gitops-status`: read-only component and reconciliation status.
@@ -72,6 +73,10 @@ Stable policies deliberately contain no Kubernetes Service ClusterIP allowance. 
 The canonical endpoint record includes cluster and context, Service and EndpointSlice identities, endpoint address and port, control-plane and kube-apiserver identities, and kind Docker network attachment. Its SHA-256 is recorded on every generated policy. Snapshots A, B, and C must match, and live policies are checked before and after Helm. No missing, multiple, non-Ready, malformed, broad, or changed endpoint is accepted.
 
 This behavior is specific to the observed kind/kindnet post-DNAT enforcement path. It must be regenerated after cluster recreation. Traefik's older ClusterIP rule and control-plane placement remain unchanged pending a separate review.
+
+A Docker restart can retain kind containers while assigning their network attachments different addresses. When the verified control-plane endpoint changes, `make gitops-api-policy-reconcile` records snapshots A and B plus the three current policy UIDs, resource versions, specifications, and managed fields. It permits only the endpoint identity annotation and exact `/32` CIDR to change. Confirmation is `<context>/argocd-api-endpoint-policies/<old-identity-checksum>/<new-identity-checksum>`. UIDs, resource versions, Git revision, and endpoint identity are checked again after confirmation. Each JSON Patch has UID and resource-version preconditions and executes once; snapshot C and the normalized live checksum must match afterward. A current set is a no-op, while a missing or mixed set fails closed. Sanitized checksummed evidence is retained under `.artifacts/gitops-api-policy-reconcile/`.
+
+Runtime validation checks controller generation and desired, updated, available, and ready replica counts together with every selected Pod. Pending or failed phases, unready containers, crash loops, image-pull failures, and restart-count growth fail validation; a Deployment rollout condition alone is not proof of health.
 
 The probe uses only Python standard-library networking from the already deployed immutable Golden Path image. API success means TCP and TLS completed; an HTTP 401 or 403 is an expected connectivity result and does not require an application credential. Timeout, refusal, DNS, TLS, HTTP authorization, socket, and process failures are reported separately. One Pod performs one assertion, with a two-second inner timeout and twenty-second outer deadline.
 
