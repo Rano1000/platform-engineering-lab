@@ -44,6 +44,8 @@ make app-network-test
 make app-recovery-test
 ```
 
+For the network test, enter `app-network-policy-test` after reviewing the stated scope. It keeps at most two temporary resources in `observability` at once, records ten independent outcomes, captures sanitized evidence under `.artifacts/app-network/`, and removes each exact resource through UID-aware cleanup only after diagnostics are complete. Do not rerun or clean resources manually if the command preserves evidence after a failure.
+
 ## Remove Phase 2 runtime resources
 
 ```sh

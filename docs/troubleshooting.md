@@ -32,7 +32,9 @@ This is expected after the `gitops/golden-path-api` Application exists. Use `mak
 
 Earlier Phase 2 chart revisions installed `NetworkPolicy/observability/golden-path-golden-path-api-metrics-test-egress`. The policy is a validation fixture, not application desired state. Do not widen `AppProject/platform-apps` or delete the live policy during repository reconciliation.
 
-First review the root and child diffs. Because pruning is disabled, synchronizing the corrected chart does not delete the existing Helm-owned policy. A separate exact-resource runtime gate must record its UID and Helm ownership, delete only that named policy, and then run `make app-network-test`. The guarded test creates a uniquely named replacement policy, proves approved and denied metrics flows, and removes its temporary policy and Pods.
+First review the root and child diffs. Because pruning is disabled, synchronizing the corrected chart does not delete the existing Helm-owned policy. A separate exact-resource runtime gate must record its UID and Helm ownership and delete only that named policy. The completed local adoption removed this obsolete fixture; a fresh environment that never installed the older chart will not have it.
+
+After exact cleanup, `make app-network-test` creates a uniquely owned replacement only for the duration of validation. Type `app-network-policy-test` when prompted. If the command fails, do not rerun or clean resources manually. Inspect its unique directory under `.artifacts/app-network/`. Diagnostics are captured and sanitized before UID-aware cleanup; incomplete evidence deliberately preserves the exact affected resource. Cleanup JSON distinguishes successful deletion, verified absence races, UID reuse, authorization failures, API failures, and timeouts.
 
 ## Root synchronization reports that origin/main changed
 

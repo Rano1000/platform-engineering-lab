@@ -11,7 +11,7 @@ import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 APP_NAMESPACE = "platform-apps"
-TEMPORARY_POLICY = "metrics-test-egress-$suffix"
+TEMPORARY_POLICY = "metrics-test-egress-$ant_suffix"
 OLD_POLICY = "golden-path-golden-path-api-metrics-test-egress"
 
 
@@ -53,19 +53,20 @@ def validate_documents(documents: list[dict]) -> None:
 
 def validate_harness(content: str) -> None:
     required = (
-        f'policy="{TEMPORARY_POLICY}"',
-        'kubectl_lab delete networkpolicy "$policy" --namespace observability',
-        'kubectl_lab get "$app_cleanup_resource" --namespace observability',
+        f'ant_policy="{TEMPORARY_POLICY}"',
+        'cleanup-kubernetes-resource.py" cleanup',
+        '--namespace "$ANT_NAMESPACE"',
         "app.kubernetes.io/managed-by: platform-engineering-lab",
         "platform.engineering-lab/purpose: metrics-test",
-        "platform.engineering-lab/run-id: $suffix",
+        "platform.engineering-lab/run-id: $ant_suffix",
         "kind: NetworkPolicy",
-        "namespace: observability",
+        "ANT_NAMESPACE=observability",
         "port: 8080",
     )
     assert all(value in content for value in required)
     assert OLD_POLICY not in content
-    assert content.index('trap cleanup_on_exit') < content.index('kubectl_lab apply -f -')
+    assert "--ignore-not-found" not in content
+    assert content.index("ant_capture_context") < content.index("ant_cleanup_resource networkpolicy")
 
 
 def rejected(action, label: str) -> None:
@@ -79,7 +80,7 @@ def rejected(action, label: str) -> None:
 def main() -> None:
     documents = render_chart()
     validate_documents(documents)
-    harness = (ROOT / "scripts/app.sh").read_text(encoding="utf-8")
+    harness = (ROOT / "scripts/test-app-network.sh").read_text(encoding="utf-8")
     validate_harness(harness)
     cross_namespace = copy.deepcopy(documents)
     cross_namespace[0].setdefault("metadata", {})["namespace"] = "observability"

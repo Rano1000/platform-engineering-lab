@@ -29,6 +29,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Make the application NetworkPolicy test sequential, independently classified, diagnostics-first, and UID-aware, with at most two temporary resources at once.
 - Keep the GitOps workload chart within `platform-apps` and create the observability metrics egress policy only as a guarded temporary validation resource.
 - Suppress a redundant chart-promotion proposal when committed evidence already identifies identical approved chart content.
 - Make guarded root diffs lifecycle-aware, preserving strict initial creation while allowing only a checksummed, forward chart-identity modification after bootstrap.

@@ -36,9 +36,11 @@ python3 scripts/validate-reconciliation.py --self-test
 python3 scripts/validate-app-image.py --self-test
 python3 scripts/resolve-kubernetes-api.py self-test
 python3 scripts/network-probe.py self-test
+python3 scripts/app-network-probe.py self-test
 python3 scripts/validate-diagnostic-path.py self-test
 python3 scripts/cleanup-kubernetes-resource.py self-test
 python3 scripts/test-gitops-network-harness.py
+python3 scripts/test-app-network-harness.py
 python3 scripts/test-gitops-install.py
 python3 scripts/validate-default-appproject.py self-test
 python3 scripts/check-optional-argo-application.py --self-test
