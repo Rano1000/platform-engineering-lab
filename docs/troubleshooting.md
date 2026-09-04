@@ -38,6 +38,8 @@ A Ready kindnet DaemonSet does not prove that its policy watchers recovered afte
 
 The recovery preflight validates kind's exact DaemonSet selector (`app=kindnet`) independently from the additional `k8s-app=kindnet` Pod-template label. A selector mismatch, missing template label, unexpected owner UID, unready Pod, incomplete runtime image identity, or anything other than one Pod per expected node stops before the confirmation prompt and before deletion.
 
+If kindnet recovery stops at confirmation, copy the freshly displayed identity as one uninterrupted line. The shared confirmation helper deliberately rejects EOF, missing input, whitespace differences, partial identities, and stale Pod UIDs; it never interprets those failures as approval to delete a Pod.
+
 First review the root and child diffs. Because pruning is disabled, synchronizing the corrected chart does not delete the existing Helm-owned policy. A separate exact-resource runtime gate must record its UID and Helm ownership and delete only that named policy. The completed local adoption removed this obsolete fixture; a fresh environment that never installed the older chart will not have it.
 
 After exact cleanup, `make app-network-test` creates a uniquely owned replacement only for the duration of validation. Type `app-network-policy-test` when prompted. If the command fails, do not rerun or clean resources manually. Inspect its unique directory under `.artifacts/app-network/`. Diagnostics are captured and sanitized before UID-aware cleanup; incomplete evidence deliberately preserves the exact affected resource. Cleanup JSON distinguishes successful deletion, verified absence races, UID reuse, authorization failures, API failures, and timeouts.

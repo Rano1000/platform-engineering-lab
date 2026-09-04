@@ -19,6 +19,18 @@ die() {
   exit 1
 }
 
+confirm_exact() {
+  expected=$1
+  message=$2
+  [ -n "$expected" ] || die 'Confirmation identity is empty; refusing to continue.'
+  [ -t 0 ] || die 'This operation requires an interactive terminal and explicit confirmation.'
+  printf '%s\nType %s to continue: ' "$message" "$expected"
+  if ! IFS= read -r confirmation; then
+    die 'Confirmation input ended before an exact value was received; no change was made.'
+  fi
+  [ "$confirmation" = "$expected" ] || die 'Confirmation did not match; no change was made.'
+}
+
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "$1 is required. Install it using the official documentation, then retry."
 }

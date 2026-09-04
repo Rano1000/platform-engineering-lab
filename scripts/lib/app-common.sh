@@ -81,12 +81,3 @@ refuse_helm_mutation_when_gitops_owned() {
     die "Argo Application '$ARGO_APPLICATION_NAME' owns this workload. Helm mutation is disabled; use the GitOps workflow."
   fi
 }
-
-confirm_exact() {
-  expected=$1
-  message=$2
-  [ -t 0 ] || die 'This operation requires an interactive terminal and explicit confirmation.'
-  printf '%s\nType %s to continue: ' "$message" "$expected"
-  read -r confirmation
-  [ "$confirmation" = "$expected" ] || die 'Confirmation did not match; no change was made.'
-}
