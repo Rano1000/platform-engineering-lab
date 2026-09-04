@@ -50,15 +50,15 @@ ALLOWED_TRANSITION_POINTERS = {
     "/spec/source/targetRevision",
 }
 EXPECTED_TRANSITION = {
-    "applicationManifestSha256": "aaff03e8056fa80d42e1f3d7ece05a8fd5474073a748f9f2b2b524668ab32725",
-    "approvedEnvironmentRevision": "e16bef72ee5299d62be2510e0b5e2a71efb7753a",
-    "chartTree": "1434d967b4087a7a8ea738aa1770192c61926dee",
+    "applicationManifestSha256": "5ae5f67389a1108755ffe1c612cc2682cb706199a5db1c9511c79bbfedd0d121",
+    "approvedEnvironmentRevision": "b2b32dc52aa458f0dd4ae943ec32b2593e2cff0e",
+    "chartTree": "594cf7c09324cf56157e0e85ee45141c2c35ce3a",
     "imageDigest": "sha256:e12b5835af642aa1ea153ed27b4aa0481c1cf03e434702106bf57dfeeb7a70cf",
     "imageSourceRevision": "e4cbf6cfa1817fe8dede7eb80d75bb94131163b2",
-    "newChartRevision": "f6171ce973cbe47244dfeb7e6698e4279ba0df18",
-    "previousChartRevision": "3787c00564553253be81d41ce5ec2b567d4f6d5d",
-    "promotionEvidenceSha256": "812a018017e3d6cd1e38f68bafba71ef3b06d4b9566e3545a63d7814e9ece5f2",
-    "protectedChildSpecSha256": "90f5b71259c9fb7f7f477067abb763f5a6019d40149fdb96180ae9a712e7334b",
+    "newChartRevision": "cd2bd9cd316119271f89d47cb7cc8ca4db914a01",
+    "previousChartRevision": "f6171ce973cbe47244dfeb7e6698e4279ba0df18",
+    "promotionEvidenceSha256": "67f31d3d0bd7789f8914fd70133818393bd57f957095720a69d127e92c9f3c45",
+    "protectedChildSpecSha256": "9ca1b440f924ba4ecd9bc0f4f59607083c17ba86ea63daf764be09fb85bd838e",
     "schemaVersion": 1,
 }
 
