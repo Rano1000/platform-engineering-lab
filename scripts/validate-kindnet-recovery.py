@@ -1,44 +1,172 @@
 #!/usr/bin/env python3
 """Validate immutable kindnet recovery identities without broad selectors or retries."""
-import argparse, hashlib, json, os, pathlib
 
-def load(path): return json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
-def pods(value): return sorted(value.get("items", value) if isinstance(value, dict) else value, key=lambda x: x["spec"]["nodeName"])
-def identity(ds, items, image):
-    assert ds["metadata"]["name"] == "kindnet" and ds["metadata"]["namespace"] == "kube-system"
-    assert ds["spec"]["selector"]["matchLabels"] == {"k8s-app": "kindnet"}
-    assert ds["spec"]["template"]["spec"]["containers"][0]["image"] == image
-    assert ds["status"]["desiredNumberScheduled"] == 3 and len(items) == 3
-    result={"schemaVersion":1,"daemonSet":{"uid":ds["metadata"]["uid"],"generation":ds["metadata"]["generation"],"image":image},
-      "pods":[{"name":p["metadata"]["name"],"uid":p["metadata"]["uid"],"node":p["spec"]["nodeName"]} for p in pods(items)]}
-    assert len({p["node"] for p in result["pods"]}) == 3
-    return result
+import argparse
+import hashlib
+import json
+import os
+import pathlib
+import re
+
+
+EXPECTED_SELECTOR = {"matchLabels": {"app": "kindnet"}}
+REQUIRED_TEMPLATE_LABELS = {"app": "kindnet", "k8s-app": "kindnet"}
+EXPECTED_NODES = (
+    "platform-engineering-lab-control-plane",
+    "platform-engineering-lab-worker",
+    "platform-engineering-lab-worker2",
+)
+IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def fail(message):
+    raise ValueError(message)
+
+
+def load(path):
+    return json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+
+
+def ordered_pods(value):
+    items = value.get("items", value) if isinstance(value, dict) else value
+    by_node = {}
+    for pod in items:
+        node = pod.get("spec", {}).get("nodeName")
+        if node in by_node:
+            fail(f"multiple kindnet Pods exist on node {node}")
+        by_node[node] = pod
+    if set(by_node) != set(EXPECTED_NODES):
+        fail(f"kindnet Pod nodes differ from the expected nodes: {sorted(by_node)}")
+    return [by_node[node] for node in EXPECTED_NODES]
+
+
+def validate_daemonset(daemonset, image):
+    metadata = daemonset.get("metadata", {})
+    if (metadata.get("name"), metadata.get("namespace")) != ("kindnet", "kube-system"):
+        fail("kindnet DaemonSet identity is unexpected")
+    selector = daemonset.get("spec", {}).get("selector")
+    if selector != EXPECTED_SELECTOR:
+        fail(f"kindnet DaemonSet selector must equal {EXPECTED_SELECTOR}")
+    labels = daemonset["spec"].get("template", {}).get("metadata", {}).get("labels", {})
+    if any(labels.get(key) != value for key, value in REQUIRED_TEMPLATE_LABELS.items()):
+        fail("kindnet Pod template does not contain the required app and k8s-app labels")
+    containers = daemonset["spec"]["template"].get("spec", {}).get("containers", [])
+    if len(containers) != 1 or containers[0].get("image") != image:
+        fail("kindnet DaemonSet image differs from the pinned identity")
+    status = daemonset.get("status", {})
+    if any(status.get(key) != 3 for key in ("desiredNumberScheduled", "currentNumberScheduled", "numberReady")):
+        fail("kindnet DaemonSet must be desired/current/Ready 3/3/3")
+    if not metadata.get("uid") or not isinstance(metadata.get("generation"), int):
+        fail("kindnet DaemonSet UID or generation is missing")
+
+
+def validate_pod(pod, daemonset_uid, image, expected_node=None):
+    metadata, spec, status = pod.get("metadata", {}), pod.get("spec", {}), pod.get("status", {})
+    node = spec.get("nodeName")
+    if expected_node is not None and node != expected_node:
+        fail(f"kindnet Pod placement changed from {expected_node} to {node}")
+    if any(metadata.get("labels", {}).get(key) != value for key, value in EXPECTED_SELECTOR["matchLabels"].items()):
+        fail("kindnet Pod does not match the exact DaemonSet selector")
+    owners = [owner for owner in metadata.get("ownerReferences", []) if owner.get("controller") is True]
+    if len(owners) != 1 or (
+        owners[0].get("apiVersion"), owners[0].get("kind"), owners[0].get("name"), owners[0].get("uid")
+    ) != ("apps/v1", "DaemonSet", "kindnet", daemonset_uid):
+        fail("kindnet Pod is not directly controlled by the exact DaemonSet UID")
+    containers = spec.get("containers", [])
+    statuses = status.get("containerStatuses", [])
+    if len(containers) != 1 or containers[0].get("image") != image:
+        fail("kindnet Pod image differs from the pinned identity")
+    if status.get("phase") != "Running" or len(statuses) != 1 or statuses[0].get("ready") is not True:
+        fail("kindnet Pod is not Running and Ready")
+    if statuses[0].get("image") != image or not IMAGE_ID.fullmatch(statuses[0].get("imageID", "")):
+        fail("kindnet Pod runtime image identity is incomplete or unexpected")
+    if not metadata.get("name") or not metadata.get("uid"):
+        fail("kindnet Pod name or UID is missing")
+    return {
+        "name": metadata["name"], "uid": metadata["uid"], "node": node,
+        "ownerUID": daemonset_uid, "image": image, "runtimeImageID": statuses[0]["imageID"],
+        "restartCount": statuses[0].get("restartCount", 0),
+    }
+
+
+def identity(daemonset, items, image):
+    validate_daemonset(daemonset, image)
+    daemonset_uid = daemonset["metadata"]["uid"]
+    validated = [
+        validate_pod(pod, daemonset_uid, image, node)
+        for node, pod in zip(EXPECTED_NODES, ordered_pods(items))
+    ]
+    return {
+        "schemaVersion": 1, "selector": EXPECTED_SELECTOR,
+        "requiredTemplateLabels": REQUIRED_TEMPLATE_LABELS,
+        "daemonSet": {
+            "uid": daemonset_uid, "generation": daemonset["metadata"]["generation"], "image": image,
+        },
+        "pods": validated,
+    }
+
+
 def main():
-    p=argparse.ArgumentParser(); s=p.add_subparsers(dest="cmd",required=True)
-    q=s.add_parser("preflight"); q.add_argument("--daemonset"); q.add_argument("--pods"); q.add_argument("--image"); q.add_argument("--output")
-    q=s.add_parser("confirmation"); q.add_argument("--identity"); q.add_argument("--context")
-    q=s.add_parser("plan"); q.add_argument("--identity")
-    q=s.add_parser("unchanged"); q.add_argument("--identity"); q.add_argument("--daemonset"); q.add_argument("--pod"); q.add_argument("--node"); q.add_argument("--uid")
-    q=s.add_parser("replacement"); q.add_argument("--pods"); q.add_argument("--node"); q.add_argument("--old-name"); q.add_argument("--old-uid"); q.add_argument("--image")
-    q=s.add_parser("manifest"); q.add_argument("--root")
-    a=p.parse_args()
-    if a.cmd=="preflight":
-      value=identity(load(a.daemonset),load(a.pods)["items"],a.image); pathlib.Path(a.output).write_text(json.dumps(value,sort_keys=True,separators=(",",":"))+"\n"); return
-    value=load(a.identity) if hasattr(a,"identity") else None
-    if a.cmd=="confirmation": print(a.context+"/kindnet/"+value["daemonSet"]["uid"]+"/"+",".join(x["uid"] for x in value["pods"])); return
-    if a.cmd=="plan":
-      for x in value["pods"]: print("|".join((x["node"],x["name"],x["uid"])))
-      return
-    if a.cmd=="unchanged":
-      ds=load(a.daemonset); pod=load(a.pod); assert ds["metadata"]["uid"]==value["daemonSet"]["uid"] and ds["metadata"]["generation"]==value["daemonSet"]["generation"]
-      assert pod["metadata"]["uid"]==a.uid and pod["spec"]["nodeName"]==a.node; return
-    if a.cmd=="replacement":
-      items=pods(load(a.pods)); assert len(items)==1; pod=items[0]; assert pod["spec"]["nodeName"]==a.node and pod["metadata"]["uid"]!=a.old_uid and pod["metadata"]["name"]!=a.old_name
-      assert pod["spec"]["containers"][0]["image"]==a.image; return
-    root=pathlib.Path(a.root); files={}
-    for path in sorted(root.rglob("*")):
-      if path.name=="evidence-manifest.json": continue
-      assert not path.is_symlink() and (path.is_dir() or path.is_file())
-      if path.is_file(): files[str(path.relative_to(root))]=hashlib.sha256(path.read_bytes()).hexdigest()
-    tmp=root/".manifest.tmp"; tmp.write_text(json.dumps({"schemaVersion":1,"files":files},sort_keys=True,separators=(",",":"))+"\n"); os.replace(tmp,root/"evidence-manifest.json")
-if __name__=="__main__": main()
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="cmd", required=True)
+    command = subparsers.add_parser("preflight")
+    command.add_argument("--daemonset"); command.add_argument("--pods"); command.add_argument("--image"); command.add_argument("--output")
+    command = subparsers.add_parser("confirmation")
+    command.add_argument("--identity"); command.add_argument("--context")
+    command = subparsers.add_parser("plan"); command.add_argument("--identity")
+    command = subparsers.add_parser("unchanged")
+    command.add_argument("--identity"); command.add_argument("--daemonset"); command.add_argument("--pod")
+    command.add_argument("--node"); command.add_argument("--uid")
+    command = subparsers.add_parser("replacement")
+    command.add_argument("--pods"); command.add_argument("--node"); command.add_argument("--old-name")
+    command.add_argument("--old-uid"); command.add_argument("--image"); command.add_argument("--daemonset-uid")
+    command = subparsers.add_parser("manifest"); command.add_argument("--root")
+    args = parser.parse_args()
+    try:
+        if args.cmd == "preflight":
+            value = identity(load(args.daemonset), load(args.pods)["items"], args.image)
+            pathlib.Path(args.output).write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
+            return
+        value = load(args.identity) if hasattr(args, "identity") else None
+        if args.cmd == "confirmation":
+            print(args.context + "/kindnet/" + value["daemonSet"]["uid"] + "/" + ",".join(item["uid"] for item in value["pods"]))
+            return
+        if args.cmd == "plan":
+            for item in value["pods"]:
+                print("|".join((item["node"], item["name"], item["uid"])))
+            return
+        if args.cmd == "unchanged":
+            daemonset, pod = load(args.daemonset), load(args.pod)
+            validate_daemonset(daemonset, value["daemonSet"]["image"])
+            if daemonset["metadata"]["uid"] != value["daemonSet"]["uid"] or daemonset["metadata"]["generation"] != value["daemonSet"]["generation"]:
+                fail("kindnet DaemonSet identity changed after confirmation")
+            current = validate_pod(pod, value["daemonSet"]["uid"], value["daemonSet"]["image"], args.node)
+            if current["uid"] != args.uid:
+                fail("kindnet Pod UID changed after confirmation")
+            return
+        if args.cmd == "replacement":
+            items = load(args.pods).get("items", [])
+            if len(items) != 1:
+                fail("replacement query must return exactly one Pod")
+            current = validate_pod(items[0], args.daemonset_uid, args.image, args.node)
+            if current["uid"] == args.old_uid or current["name"] == args.old_name:
+                fail("kindnet replacement retained the original name or UID")
+            return
+        root = pathlib.Path(args.root)
+        files = {}
+        for path in sorted(root.rglob("*")):
+            if path.name == "evidence-manifest.json":
+                continue
+            if path.is_symlink() or (not path.is_dir() and not path.is_file()):
+                fail(f"unsafe recovery evidence entry: {path}")
+            if path.is_file():
+                files[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
+        temporary = root / ".manifest.tmp"
+        temporary.write_text(json.dumps({"schemaVersion": 1, "files": files}, sort_keys=True, separators=(",", ":")) + "\n")
+        os.replace(temporary, root / "evidence-manifest.json")
+    except (AssertionError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise SystemExit(f"ERROR {error}") from error
+
+
+if __name__ == "__main__":
+    main()

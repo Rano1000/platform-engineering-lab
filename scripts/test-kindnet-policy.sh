@@ -12,8 +12,8 @@ knp_temporary=$(mktemp -d)
 trap 'rm -rf "$knp_temporary"' EXIT HUP INT TERM
 
 kubectl_lab get daemonset kindnet -n kube-system -o json >"$knp_temporary/daemonset.json"
-kubectl_lab get pods -n kube-system -l k8s-app=kindnet -o json >"$knp_temporary/pods.json"
-kubectl_lab logs -n kube-system -l k8s-app=kindnet --all-containers --since=10m >"$knp_temporary/kindnet.log" 2>&1 || true
+kubectl_lab get pods -n kube-system -l app=kindnet -o json >"$knp_temporary/pods.json"
+kubectl_lab logs -n kube-system -l app=kindnet --all-containers --since=10m >"$knp_temporary/kindnet.log" 2>&1 || true
 for knp_file in daemonset.json pods.json kindnet.log; do
   python3 "$SCRIPT_DIR/redact-network-diagnostics.py" --sanitize "$knp_temporary/$knp_file" "$knp_root/$knp_file"
 done
