@@ -8,6 +8,9 @@ import base64
 import json
 import pathlib
 import re
+import socket
+import ssl
+import http.client
 import urllib.error
 import urllib.request
 
@@ -140,6 +143,23 @@ def pod_overrides(args: argparse.Namespace) -> None:
     print(json.dumps(spec, separators=(",", ":")))
 
 
+def listener_overrides(args: argparse.Namespace) -> None:
+    assert SHA256.fullmatch(args.image) and 1024 <= args.port <= 65535
+    source = "import socket;s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind(('0.0.0.0',int(__import__('sys').argv[1])));s.listen();print('listener_ready',flush=True);exec('while True:\\n c,_=s.accept()\\n c.close()\\n print(\"connection_accepted\",flush=True)')"
+    spec = {"spec": {"nodeName": args.node, "automountServiceAccountToken": False,
+        "terminationGracePeriodSeconds": 1,
+        "securityContext": {"runAsNonRoot": True, "runAsUser": 10001, "runAsGroup": 10001,
+                            "seccompProfile": {"type": "RuntimeDefault"}},
+        "containers": [{"name": "listener", "image": args.image, "imagePullPolicy": "IfNotPresent",
+            "command": ["python", "-c", source], "args": [str(args.port)],
+            "ports": [{"containerPort": args.port}],
+            "resources": {"requests": {"cpu": "5m", "memory": "16Mi"},
+                          "limits": {"cpu": "25m", "memory": "32Mi"}},
+            "securityContext": {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]},
+                                "readOnlyRootFilesystem": True}}]}}
+    print(json.dumps(spec, separators=(",", ":")))
+
+
 def validate_log(args: argparse.Namespace) -> None:
     expected = json.loads(pathlib.Path(args.cases).read_text(encoding="utf-8"))
     lines = [json.loads(line) for line in pathlib.Path(args.log).read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -164,26 +184,60 @@ def validate_log(args: argparse.Namespace) -> None:
         raise SystemExit("probe suite container did not terminate successfully")
 
 
-def host_http(args: argparse.Namespace) -> None:
+def host_http_result(args: argparse.Namespace, opener=urllib.request.urlopen) -> tuple[dict, int]:
     started = __import__("time").monotonic()
     status, category, detail, code = 0, "process_failure", "", 2
     request = urllib.request.Request(args.url, headers={"Host": args.host_header})
     try:
-        with urllib.request.urlopen(request, timeout=args.timeout) as response:
+        with opener(request, timeout=args.timeout) as response:
             status = response.status
     except urllib.error.HTTPError as error:
         status = error.code
+        category = "expected_http_error" if status == args.expected_status else "unexpected_http_status"
+        detail = f"HTTP {status}"
     except urllib.error.URLError as error:
-        category, detail, code = "connection_failure", str(error.reason), 1
+        reason = error.reason
+        if isinstance(reason, socket.gaierror):
+            category = "dns_failure"
+        elif isinstance(reason, ConnectionRefusedError):
+            category = "connection_refused"
+        elif isinstance(reason, (socket.timeout, TimeoutError)):
+            category = "tcp_connect_timeout"
+        elif isinstance(reason, ssl.SSLError):
+            category = "tls_failure"
+        else:
+            category = "connection_failure"
+        detail, code = str(reason), 1
+    except (socket.timeout, TimeoutError) as error:
+        category, detail, code = "http_read_timeout", str(error) or "HTTP read timed out", 1
+    except ConnectionRefusedError as error:
+        category, detail, code = "connection_refused", str(error), 1
+    except socket.gaierror as error:
+        category, detail, code = "dns_failure", str(error), 1
+    except ssl.SSLError as error:
+        category, detail, code = "tls_failure", str(error), 1
+    except (http.client.BadStatusLine, http.client.HTTPException) as error:
+        category, detail, code = "malformed_response", str(error), 1
+    except Exception as error:  # Always emit one result for operational failures.
+        category, detail, code = "process_failure", f"{type(error).__name__}: {error}", 2
     if status:
-        category, detail = "http_response", f"HTTP {status}"
+        if category == "process_failure":
+            category = "http_success" if status < 400 else "expected_http_error"
+        detail = f"HTTP {status}"
         code = 0 if status == args.expected_status else 1
+        if code:
+            category = "unexpected_http_status"
     result = {"test_name": args.name, "source_identity": "localhost", "source_node": "workstation",
               "destination_ip": "127.0.0.1", "destination_port": 80, "path": args.url,
               "expected_result": f"http_{args.expected_status}", "observed_result": f"http_{status}",
               "duration_seconds": round(__import__("time").monotonic() - started, 3),
               "exit_code": code, "error_category": category, "detail": detail}
-    print(json.dumps(result, sort_keys=True))
+    return result, code
+
+
+def host_http(args: argparse.Namespace) -> None:
+    result, code = host_http_result(args)
+    print(json.dumps(result, sort_keys=True), flush=True)
     raise SystemExit(code)
 
 
@@ -204,6 +258,33 @@ def self_test() -> None:
     ):
         result = classify_fixture(outcome, "deny")
         assert result[1:] == (category, code)
+    fixture = argparse.Namespace(url="http://invalid/", host_header="example", timeout=0.1,
+                                 expected_status=404, name="fixture")
+    class Response:
+        status = 404
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+    result, code = host_http_result(fixture, lambda *_args, **_kwargs: Response())
+    assert code == 0 and result["error_category"] == "expected_http_error"
+    for error, category, expected_code in (
+        (urllib.error.HTTPError(fixture.url, 503, "bad", {}, None), "unexpected_http_status", 1),
+        (urllib.error.URLError(socket.gaierror("dns")), "dns_failure", 1),
+        (urllib.error.URLError(ConnectionRefusedError("refused")), "connection_refused", 1),
+        (urllib.error.URLError(socket.timeout("connect")), "tcp_connect_timeout", 1),
+        (urllib.error.URLError(ssl.SSLError("tls")), "tls_failure", 1),
+        (http.client.BadStatusLine("bad"), "malformed_response", 1),
+        (RuntimeError("process"), "process_failure", 2),
+    ):
+        def raising(*_args, error=error, **_kwargs): raise error
+        result, code = host_http_result(fixture, raising)
+        assert code == expected_code and result["error_category"] == category
+    for error in (TimeoutError("read timed out"), socket.timeout("socket timed out")):
+        def raising(*_args, error=error, **_kwargs): raise error
+        result, code = host_http_result(fixture, raising)
+        assert code == 1 and result["error_category"] == "http_read_timeout"
+        assert set(result) == {"test_name", "source_identity", "source_node", "destination_ip",
+            "destination_port", "path", "expected_result", "observed_result", "duration_seconds",
+            "exit_code", "error_category", "detail"}
     print("PASS  application network probes classify HTTP, denial timeout, refusal, DNS, socket, and process outcomes independently.")
 
 
@@ -213,6 +294,9 @@ def main() -> None:
     pod = commands.add_parser("pod-overrides")
     pod.add_argument("--node", required=True); pod.add_argument("--image", required=True)
     pod.add_argument("--cases", required=True); pod.add_argument("--timeout", type=float, required=True)
+    listener = commands.add_parser("listener-overrides")
+    listener.add_argument("--node", required=True); listener.add_argument("--image", required=True)
+    listener.add_argument("--port", type=int, required=True)
     validate = commands.add_parser("validate-log")
     validate.add_argument("--cases", required=True); validate.add_argument("--log", required=True)
     validate.add_argument("--pod", required=True); validate.add_argument("--uid", required=True)
@@ -224,6 +308,7 @@ def main() -> None:
     commands.add_parser("self-test")
     args = parser.parse_args()
     if args.command == "pod-overrides": pod_overrides(args)
+    elif args.command == "listener-overrides": listener_overrides(args)
     elif args.command == "validate-log": validate_log(args)
     elif args.command == "host-http": host_http(args)
     else: self_test()

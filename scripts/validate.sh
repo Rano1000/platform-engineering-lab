@@ -332,11 +332,15 @@ ingress = next((doc for doc in policies if doc["metadata"]["name"].endswith("-al
 if ingress is None or len(policies) != 1:
     raise SystemExit("the chart must own exactly one platform-apps ingress policy")
 ingress_rules = ingress.get("spec", {}).get("ingress", [])
-if len(ingress_rules) != 2 or any("from" not in rule or "to" in rule for rule in ingress_rules):
+if len(ingress_rules) != 1 or any("from" not in rule or "to" in rule for rule in ingress_rules):
     raise SystemExit(f"unexpected application ingress rules: {ingress_rules!r}")
 for rule in ingress_rules:
     if rule.get("ports") != [{"protocol": "TCP", "port": 8080}]:
         raise SystemExit(f"unexpected application policy port: {rule.get('ports')!r}")
+source = ingress_rules[0]["from"][0]
+if source != {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "platform-system"}},
+              "podSelector": {"matchLabels": {"app.kubernetes.io/name": "traefik"}}}:
+    raise SystemExit(f"permanent application ingress must trust only Traefik: {source!r}")
 for document in yaml.safe_load_all(open(sys.argv[1], encoding="utf-8")):
     if isinstance(document, dict):
         namespace = document.get("metadata", {}).get("namespace", "platform-apps")

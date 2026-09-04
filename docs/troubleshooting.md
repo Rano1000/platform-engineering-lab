@@ -32,6 +32,10 @@ This is expected after the `gitops/golden-path-api` Application exists. Use `mak
 
 Earlier Phase 2 chart revisions installed `NetworkPolicy/observability/golden-path-golden-path-api-metrics-test-egress`. The policy is a validation fixture, not application desired state. Do not widen `AppProject/platform-apps` or delete the live policy during repository reconciliation.
 
+## NetworkPolicy tests connect despite default-deny
+
+A Ready kindnet DaemonSet does not prove that its policy watchers recovered after Docker restarted. Preserve test evidence, inspect bounded kindnet logs for API/watch errors, and do not rerun application tests. After exact retained-resource cleanup is separately approved, use the guarded `make kindnet-policy-recover` transaction only with explicit runtime approval. Partial recovery is not retried or rolled back automatically.
+
 First review the root and child diffs. Because pruning is disabled, synchronizing the corrected chart does not delete the existing Helm-owned policy. A separate exact-resource runtime gate must record its UID and Helm ownership and delete only that named policy. The completed local adoption removed this obsolete fixture; a fresh environment that never installed the older chart will not have it.
 
 After exact cleanup, `make app-network-test` creates a uniquely owned replacement only for the duration of validation. Type `app-network-policy-test` when prompted. If the command fails, do not rerun or clean resources manually. Inspect its unique directory under `.artifacts/app-network/`. Diagnostics are captured and sanitized before UID-aware cleanup; incomplete evidence deliberately preserves the exact affected resource. Cleanup JSON distinguishes successful deletion, verified absence races, UID reuse, authorization failures, API failures, and timeouts.

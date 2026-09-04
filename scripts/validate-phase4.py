@@ -31,6 +31,13 @@ def validate_application_renders(local: pathlib.Path, gitops: pathlib.Path) -> N
     assert gitops_image == "ghcr.io/rano1000/golden-path-api@sha256:" + "a" * 64
     assert local_deployment["spec"]["template"]["spec"]["containers"][0]["imagePullPolicy"] == "Never"
     assert gitops_deployment["spec"]["template"]["spec"]["containers"][0]["imagePullPolicy"] == "IfNotPresent"
+    for rendered in (documents(local), documents(gitops)):
+        assert all(item.get("metadata", {}).get("namespace", "platform-apps") == "platform-apps" for item in rendered)
+        policy = next(item for item in rendered if item.get("kind") == "NetworkPolicy")
+        assert len(policy["spec"]["ingress"]) == 1
+        source = policy["spec"]["ingress"][0]["from"][0]
+        assert source["namespaceSelector"]["matchLabels"] == {"kubernetes.io/metadata.name": "platform-system"}
+        assert source["podSelector"]["matchLabels"] == {"app.kubernetes.io/name": "traefik"}
 
 
 def pod_spec(resource: dict) -> dict | None:

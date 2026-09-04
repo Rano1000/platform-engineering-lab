@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["replicaCount", "image", "config", "service", "gateway", "probes", "resources", "autoscaling", "podDisruptionBudget", "metricsTest"],
+  "required": ["replicaCount", "image", "config", "service", "gateway", "probes", "resources", "autoscaling", "podDisruptionBudget"],
   "properties": {
     "replicaCount": {"type": "integer", "minimum": 2, "maximum": 4},
     "image": {
@@ -99,22 +99,6 @@
       "additionalProperties": false,
       "required": ["minAvailable"],
       "properties": {"minAvailable": {"type": "integer", "const": 1}}
-    },
-    "metricsTest": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["namespace", "podLabels"],
-      "properties": {
-        "namespace": {"type": "string", "const": "observability"},
-        "podLabels": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["platform.engineering-lab/purpose"],
-          "properties": {
-            "platform.engineering-lab/purpose": {"type": "string", "const": "metrics-test"}
-          }
-        }
-      }
     }
   },
   "$defs": {

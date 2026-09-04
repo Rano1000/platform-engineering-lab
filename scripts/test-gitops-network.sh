@@ -173,8 +173,10 @@ print(value["apiEndpoint"]["port"])
 PY
 api_ip=$(sed -n '1p' "$temporary/endpoint.txt")
 api_port=$(sed -n '2p' "$temporary/endpoint.txt")
-worker=$(kubectl_lab get nodes -l '!node-role.kubernetes.io/control-plane' -o jsonpath='{.items[0].metadata.name}')
-other_worker=$(kubectl_lab get nodes -l '!node-role.kubernetes.io/control-plane' -o jsonpath='{.items[1].metadata.name}')
+gnt_worker_index=${GITOPS_NETWORK_WORKER_INDEX:-0}
+case $gnt_worker_index in 0) gnt_other_index=1 ;; 1) gnt_other_index=0 ;; *) die 'GITOPS_NETWORK_WORKER_INDEX must be 0 or 1.' ;; esac
+worker=$(kubectl_lab get nodes -l '!node-role.kubernetes.io/control-plane' -o "jsonpath={.items[$gnt_worker_index].metadata.name}")
+other_worker=$(kubectl_lab get nodes -l '!node-role.kubernetes.io/control-plane' -o "jsonpath={.items[$gnt_other_index].metadata.name}")
 if [ -z "$worker" ] || [ -z "$other_worker" ]; then die 'Two workers are required for the network diagnostics.'; fi
 image=$(kubectl_lab get deployment "$APP_DEPLOYMENT" --namespace "$APP_NAMESPACE" -o jsonpath='{.spec.template.spec.containers[?(@.name=="api")].image}')
 printf '%s\n' "$image" | grep -Eq '(@sha256:[0-9a-f]{64}|:0\.1\.0-[0-9a-f]{12})$' || die "Diagnostic image is not an approved immutable identity: $image"

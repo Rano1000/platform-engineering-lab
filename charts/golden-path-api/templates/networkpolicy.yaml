@@ -20,13 +20,3 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.metricsTest.namespace }}
-          podSelector:
-            matchLabels:
-              {{- toYaml .Values.metricsTest.podLabels | nindent 14 }}
-      ports:
-        - protocol: TCP
-          port: 8080

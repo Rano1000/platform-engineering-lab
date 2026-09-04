@@ -41,19 +41,16 @@ def validate_documents(documents: list[dict]) -> None:
     assert len(policies) == 1
     assert policies[0]["metadata"]["name"] == "golden-path-golden-path-api-allow-approved-ingress"
     assert OLD_POLICY not in {item["metadata"]["name"] for item in documents}
-    metrics_rule = policies[0]["spec"]["ingress"][1]
-    assert metrics_rule["ports"] == [{"protocol": "TCP", "port": 8080}]
-    assert metrics_rule["from"][0]["namespaceSelector"]["matchLabels"] == {
-        "kubernetes.io/metadata.name": "observability"
-    }
-    assert metrics_rule["from"][0]["podSelector"]["matchLabels"] == {
-        "platform.engineering-lab/purpose": "metrics-test"
+    assert len(policies[0]["spec"]["ingress"]) == 1
+    assert policies[0]["spec"]["ingress"][0]["from"][0]["namespaceSelector"]["matchLabels"] == {
+        "kubernetes.io/metadata.name": "platform-system"
     }
 
 
 def validate_harness(content: str) -> None:
     required = (
         f'ant_policy="{TEMPORARY_POLICY}"',
+        'ant_ingress_policy="metrics-test-ingress-$ant_suffix"',
         'cleanup-kubernetes-resource.py" cleanup',
         '--namespace "$ANT_NAMESPACE"',
         "app.kubernetes.io/managed-by: platform-engineering-lab",
@@ -87,7 +84,7 @@ def main() -> None:
     rejected(lambda: validate_documents(cross_namespace), "cross-namespace chart output")
     rejected(lambda: validate_harness(harness.replace("kind: NetworkPolicy", "kind: ConfigMap")), "lost metrics isolation policy")
     rejected(lambda: validate_harness(harness.replace(TEMPORARY_POLICY, OLD_POLICY)), "ambiguous permanent policy ownership")
-    print("PASS  metrics isolation uses a uniquely owned temporary observability policy; the chart stays in platform-apps.")
+    print("PASS  metrics isolation uses exact temporary ingress and egress policies; permanent ingress trusts only Traefik.")
 
 
 if __name__ == "__main__":

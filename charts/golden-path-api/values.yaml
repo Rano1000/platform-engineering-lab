@@ -50,8 +50,3 @@ autoscaling:
 
 podDisruptionBudget:
   minAvailable: 1
-
-metricsTest:
-  namespace: observability
-  podLabels:
-    platform.engineering-lab/purpose: metrics-test

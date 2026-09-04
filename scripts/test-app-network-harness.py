@@ -25,8 +25,8 @@ def main() -> None:
     assert "--ignore-not-found" not in content
     assert "kubectl_lab delete" not in content
     assert "--selector" not in content and "-l platform.engineering-lab" not in content
-    assert 'ANT_MAX_SIMULTANEOUS_RESOURCES=2' in content
-    assert content.count("kubectl_lab run") == 1  # One reusable function; invoked sequentially for two identities.
+    assert 'ANT_MAX_SIMULTANEOUS_RESOURCES=5' in content
+    assert content.count("kubectl_lab run") == 3  # Listener, reachability preflight, and reusable assertion Pod.
     require_order(content, 'ant_run_case "$ant_allowed"', 'ant_run_case "$ant_denied"')
     require_order(content, 'ant_cleanup_resource pod "$ant_rc_name"', 'ant_run_case "$ant_denied"')
     run_case = content[content.index("ant_run_case() {"):content.index('ant_run_case "$ant_allowed"')]
@@ -47,7 +47,7 @@ def main() -> None:
     assert "ant_write_evidence_manifest" in content and 'os.replace(temporary, root / "evidence-manifest.json")' in content
     for required in (
         "pod.json", "pod.log", "describe.txt", "events.json", "pre-test.json", "phase-poll.log",
-        "temporary-policy.yaml", "application-policy.yaml", "runtime-identities.json",
+        "temporary-policy.yaml", "temporary-ingress-policy.yaml", "listener-policy.yaml", "application-policy.yaml", "runtime-identities.json",
         "approved-internal-metrics", "unapproved-internal-metrics-deny",
         "approved-outside-flow-deny", "approved-internet-deny", "approved-kubernetes-api-deny",
         "unapproved-internet-deny", "unapproved-kubernetes-api-deny", "public-$ant_public_case-blocked",
@@ -61,6 +61,30 @@ def main() -> None:
     assert 'ant_finish_status=$?' in content and 'ant_assertion_status' in content and 'ant_cleanup_status' in content
     assert "app-network-policy-test" in content
     assert "automountServiceAccountToken" in PROBE.read_text(encoding="utf-8")
+    assert '"$SCRIPT_DIR/test-kindnet-policy.sh"' in content
+    assert 'listener-overrides' in content and 'port 9090' in content
+    assert 'approved-outside-flow-deny' in content and '"port":9090' in content
+    assert 'namespace: $APP_NAMESPACE' in content and 'name: $ant_ingress_policy' in content
+    assert 'platform.engineering-lab/run-id: $ant_suffix' in content
+    assert 'kubernetes.io/metadata.name: $ANT_NAMESPACE' in content
+    assert 'platform.engineering-lab/purpose: metrics-test' in content
+    assert 'port":8081' not in content
+
+    permanent = (ROOT / "charts/golden-path-api/templates/networkpolicy.yaml").read_text(encoding="utf-8")
+    assert "observability" not in permanent and "metricsTest" not in permanent
+    assert permanent.count("namespaceSelector") == 1 and "platform-system" in permanent
+    project = (ROOT / "environments/local/gitops/workload-project.yaml").read_text(encoding="utf-8")
+    assert 'namespace: platform-apps' in project and 'namespace: "*"' not in project
+
+    kindnet_test = (ROOT / "scripts/test-kindnet-policy.sh").read_text(encoding="utf-8")
+    assert 'GITOPS_NETWORK_WORKER_INDEX=$knp_index' in kindnet_test
+    assert "for knp_index in 0 1" in kindnet_test
+    assert kindnet_test.index("validate-kindnet-enforcement.py\" preflight") < kindnet_test.index("test-gitops-network.sh")
+    recovery = (ROOT / "scripts/kindnet-policy-recover.sh").read_text(encoding="utf-8")
+    assert 'confirm_exact "$kpr_confirmation"' in recovery
+    assert recovery.count('cleanup-kubernetes-resource.py" cleanup') == 1
+    assert 'test-kindnet-policy.sh' in recovery and "retry" not in recovery.lower()
+    assert recovery.index('cleanup-kubernetes-resource.py" cleanup') < recovery.index('kubectl_lab wait')
 
     subprocess.run(["python3", str(PROBE), "self-test"], check=True)
     subprocess.run(["python3", str(ROOT / "scripts/cleanup-kubernetes-resource.py"), "self-test"], check=True)

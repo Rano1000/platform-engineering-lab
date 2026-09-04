@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Added
 
+- A separately confirmed sequential kindnet recovery command with two-worker functional policy verification and checksummed evidence.
 - Repository-local, checksum-pinned Argo CD v3.5.2 CLI provisioning for guarded diff and synchronization commands.
 - Fail-closed runtime discovery, identity checks, exact `/32` Argo API policies, and worker-pinned network preflight tests for kind/kindnet.
 - A manually dispatched, source-run-bound GHCR publication gate that cannot rebuild, promote, or contact Kubernetes.
@@ -29,8 +30,9 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Make application network probes always emit structured failures, replace closed-port denial checks with a proven listener, and use exact temporary metrics ingress and egress policies.
 - Add fail-closed policy-only reconciliation for kind API endpoint drift and require Pod-level Argo readiness instead of trusting rollout status alone.
-- Make the application NetworkPolicy test sequential, independently classified, diagnostics-first, and UID-aware, with at most two temporary resources at once.
+- Make the application NetworkPolicy test sequential, independently classified, diagnostics-first, and UID-aware; the hardened listener design uses at most five temporary resources at once.
 - Keep the GitOps workload chart within `platform-apps` and create the observability metrics egress policy only as a guarded temporary validation resource.
 - Suppress a redundant chart-promotion proposal when committed evidence already identifies identical approved chart content.
 - Make guarded root diffs lifecycle-aware, preserving strict initial creation while allowing only a checksummed, forward chart-identity modification after bootstrap.

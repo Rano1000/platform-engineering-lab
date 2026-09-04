@@ -44,7 +44,7 @@ make app-network-test
 make app-recovery-test
 ```
 
-For the network test, enter `app-network-policy-test` after reviewing the stated scope. It keeps at most two temporary resources in `observability` at once, records ten independent outcomes, captures sanitized evidence under `.artifacts/app-network/`, and removes each exact resource through UID-aware cleanup only after diagnostics are complete. Do not rerun or clean resources manually if the command preserves evidence after a failure.
+For the network test, enter `app-network-policy-test` after reviewing the stated scope. It first proves kindnet enforcement independently on both workers. The application portion keeps at most five temporary resources at once: a known listener and its ingress policy, exact run-specific application ingress and observability egress policies, and one sequential probe Pod. It records ten independent outcomes under `.artifacts/app-network/` and removes every exact resource through UID-aware cleanup only after diagnostics are complete. Do not rerun or clean resources manually if the command preserves evidence after a failure.
 
 ## Remove Phase 2 runtime resources
 

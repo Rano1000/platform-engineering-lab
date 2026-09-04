@@ -25,7 +25,9 @@ The manually bootstrapped `platform-environment` root Application tracks `main` 
 
 The child `golden-path-api` Application uses the separate `platform-apps` project. That project constrains the repository, cluster, namespace, and workload resource kinds. Both dedicated projects use an empty cluster-resource allowlist and exact namespaced-resource allowlists; neither can manage any cluster-scoped kind. AppProject cannot constrain a repository subdirectory, so repository validation and guarded automation enforce both environment and chart paths.
 
-The application chart owns resources only in `platform-apps`. Its ingress policy permits an explicitly labelled metrics client from `observability`, but the matching egress policy is a uniquely named temporary fixture owned by the guarded network test. Keeping that fixture outside permanent desired state avoids cross-namespace workload ownership while preserving the isolation proof.
+The application chart owns resources only in `platform-apps`, and its permanent ingress policy trusts only Traefik. The guarded network test creates matching, run-specific metrics ingress and egress policies; neither namespace permanently trusts a generic metrics-client label.
+
+Kindnet readiness is not used as proof of NetworkPolicy enforcement. A standalone preflight exercises bounded allow and deny flows from both workers. `make kindnet-policy-recover` is a separate, confirmed operation for sequential replacement of verified kindnet Pods and is never called automatically.
 
 Controller installation retains Argo CD's built-in `default` AppProject but replaces its permissions with a repository-owned deny-all specification. It contains no permitted repositories, destinations, or resource kinds. This prevents an unreviewed Application from bypassing the dedicated bootstrap and workload project boundaries.
 

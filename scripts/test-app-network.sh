@@ -10,7 +10,7 @@ SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd)
 ANT_NAMESPACE=observability
 ANT_INNER_TIMEOUT_SECONDS=3
 ANT_OUTER_TIMEOUT_SECONDS=30
-ANT_MAX_SIMULTANEOUS_RESOURCES=2
+ANT_MAX_SIMULTANEOUS_RESOURCES=5
 
 require_command kubectl
 require_expected_context
@@ -18,6 +18,10 @@ kubectl_lab get deployment "$APP_DEPLOYMENT" --namespace "$APP_NAMESPACE" >/dev/
   die "Application Deployment '$APP_NAMESPACE/$APP_DEPLOYMENT' is unavailable."
 ant_suffix="$(date +%s)-$$"
 ant_policy="metrics-test-egress-$ant_suffix"
+ant_ingress_policy="metrics-test-ingress-$ant_suffix"
+ant_listener="metrics-listener-$ant_suffix"
+ant_listener_policy="metrics-listener-ingress-$ant_suffix"
+ant_preflight="metrics-listener-preflight-$ant_suffix"
 ant_allowed="metrics-allowed-$ant_suffix"
 ant_denied="metrics-denied-$ant_suffix"
 ant_artifact_base=$REPOSITORY_ROOT/.artifacts/app-network
@@ -26,6 +30,9 @@ ant_temporary=$(mktemp -d)
 ant_current_pod=''
 ant_current_pod_uid=''
 ant_policy_uid=''
+ant_ingress_policy_uid=''
+ant_listener_uid=''
+ant_listener_policy_uid=''
 ant_preserve_resources=0
 ant_assertion_status=0
 ant_cleanup_status=0
@@ -88,12 +95,13 @@ ant_validate_shared_diagnostics() (
 
 ant_cleanup_resource() (
   ant_cr_kind=$1 ant_cr_name=$2 ant_cr_uid=$3
+  ant_cr_namespace=${4:-$ANT_NAMESPACE}
   ant_cr_slug=$(printf '%s-%s' "$ant_cr_kind" "$ant_cr_name" | tr '/' '_')
   ant_cr_output=$ant_diagnostics/cleanup/$ant_cr_slug.json
   python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-output \
     --base "$ant_artifact_base" --root "$ant_diagnostics" --path "$ant_cr_output"
   python3 "$SCRIPT_DIR/cleanup-kubernetes-resource.py" cleanup \
-    --context "$EXPECTED_CONTEXT" --kind "$ant_cr_kind" --namespace "$ANT_NAMESPACE" \
+    --context "$EXPECTED_CONTEXT" --kind "$ant_cr_kind" --namespace "$ant_cr_namespace" \
     --name "$ant_cr_name" --uid "$ant_cr_uid" --timeout-seconds "$ANT_OUTER_TIMEOUT_SECONDS" \
     --output "$ant_cr_output"
 )
@@ -113,11 +121,15 @@ PY
 
 ant_capture_context() (
   kubectl_lab get networkpolicy "$ant_policy" --namespace "$ANT_NAMESPACE" -o yaml >"$ant_temporary/temporary-policy.yaml"
+  kubectl_lab get networkpolicy "$ant_ingress_policy" --namespace "$APP_NAMESPACE" -o yaml >"$ant_temporary/temporary-ingress-policy.yaml"
+  kubectl_lab get networkpolicy "$ant_listener_policy" --namespace "$ANT_NAMESPACE" -o yaml >"$ant_temporary/listener-policy.yaml.live"
   kubectl_lab get networkpolicy "$APP_RELEASE-$APP_NAME-allow-approved-ingress" \
     --namespace "$APP_NAMESPACE" -o yaml >"$ant_temporary/application-policy.yaml"
   kubectl_lab get pod,networkpolicy --namespace "$ANT_NAMESPACE" -o json >"$ant_temporary/observability-resources.json"
   kubectl_lab get nodes -o json >"$ant_temporary/nodes.json"
   ant_sanitize_file "$ant_temporary/temporary-policy.yaml" "$ant_diagnostics/temporary-policy.yaml"
+  ant_sanitize_file "$ant_temporary/temporary-ingress-policy.yaml" "$ant_diagnostics/temporary-ingress-policy.yaml"
+  ant_sanitize_file "$ant_temporary/listener-policy.yaml.live" "$ant_diagnostics/listener-policy.yaml"
   ant_sanitize_file "$ant_temporary/application-policy.yaml" "$ant_diagnostics/application-policy.yaml"
   ant_sanitize_file "$ant_temporary/observability-resources.json" "$ant_diagnostics/observability-resources.json"
   ant_sanitize_file "$ant_temporary/nodes.json" "$ant_diagnostics/nodes.json"
@@ -125,7 +137,7 @@ ant_capture_context() (
 )
 
 ant_validate_global_diagnostics() (
-  for ant_vgd_file in temporary-policy.yaml application-policy.yaml observability-resources.json nodes.json runtime-identities.json; do
+  for ant_vgd_file in temporary-policy.yaml temporary-ingress-policy.yaml listener-policy.yaml application-policy.yaml observability-resources.json nodes.json runtime-identities.json; do
     [ -s "$ant_diagnostics/$ant_vgd_file" ] || return 1
   done
   for ant_vgd_result in approved-results.json denied-results.json public-metrics.json public-live.json public-ready.json; do
@@ -189,6 +201,18 @@ ant_finish() {
       fi
     fi
   fi
+  if [ "$ant_preserve_resources" -eq 0 ] && [ -n "$ant_ingress_policy_uid" ]; then
+    ant_cleanup_resource networkpolicy "$ant_ingress_policy" "$ant_ingress_policy_uid" "$APP_NAMESPACE" &&
+      ant_validate_cleanup_evidence networkpolicy "$ant_ingress_policy" || ant_cleanup_status=1
+  fi
+  if [ "$ant_preserve_resources" -eq 0 ] && [ -n "$ant_listener_policy_uid" ]; then
+    ant_cleanup_resource networkpolicy "$ant_listener_policy" "$ant_listener_policy_uid" &&
+      ant_validate_cleanup_evidence networkpolicy "$ant_listener_policy" || ant_cleanup_status=1
+  fi
+  if [ "$ant_preserve_resources" -eq 0 ] && [ -n "$ant_listener_uid" ]; then
+    ant_cleanup_resource pod "$ant_listener" "$ant_listener_uid" &&
+      ant_validate_cleanup_evidence pod "$ant_listener" || ant_cleanup_status=1
+  fi
   ant_write_evidence_manifest || ant_cleanup_status=1
   rm -rf "$ant_temporary"
   printf 'Application network diagnostics: %s\n' "$ant_diagnostics"
@@ -209,6 +233,8 @@ if [ "${APP_NETWORK_NONINTERACTIVE:-0}" != 1 ]; then
   confirm_exact app-network-policy-test \
     "Create at most $ANT_MAX_SIMULTANEOUS_RESOURCES temporary resources in observability; capture sanitized evidence before UID-aware cleanup."
 fi
+
+"$SCRIPT_DIR/test-kindnet-policy.sh"
 
 ant_image=$(kubectl_lab get deployment "$APP_DEPLOYMENT" --namespace "$APP_NAMESPACE" \
   -o jsonpath='{.spec.template.spec.containers[?(@.name=="api")].image}')
@@ -235,10 +261,67 @@ ant_api_port=$(kubectl_lab get endpointslice --namespace default -l kubernetes.i
 python3 -c 'import ipaddress,sys; [ipaddress.ip_address(v) for v in sys.argv[1:4]]; assert sys.argv[4].isdigit()' \
   "$ant_service_ip" "$ant_app_pod_ip" "$ant_api_ip" "$ant_api_port"
 
+ant_listener_overrides=$(python3 "$SCRIPT_DIR/app-network-probe.py" listener-overrides \
+  --node "$ant_other_worker" --image "$ant_image" --port 9090)
+kubectl_lab run "$ant_listener" --namespace "$ANT_NAMESPACE" --restart=Never --image="$ant_image" \
+  --labels="platform.engineering-lab/purpose=known-listener,platform.engineering-lab/run-id=$ant_suffix" \
+  --overrides="$ant_listener_overrides"
+ant_listener_uid=$(kubectl_lab get pod "$ant_listener" -n "$ANT_NAMESPACE" -o jsonpath='{.metadata.uid}')
+kubectl_lab wait -n "$ANT_NAMESPACE" --for=condition=Ready "pod/$ant_listener" --timeout="${ANT_OUTER_TIMEOUT_SECONDS}s"
+ant_listener_ip=$(kubectl_lab get pod "$ant_listener" -n "$ANT_NAMESPACE" -o jsonpath='{.status.podIP}')
+kubectl_lab get pod "$ant_listener" -n "$ANT_NAMESPACE" -o json >"$ant_temporary/listener-created.json"
+python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-dir --base "$ant_artifact_base" --root "$ant_diagnostics" --path "$ant_diagnostics/pods/$ant_listener"
+ant_sanitize_file "$ant_temporary/listener-created.json" "$ant_diagnostics/pods/$ant_listener/pre-test.json"
+printf 'Ready\n' >"$ant_diagnostics/pods/$ant_listener/phase-poll.log"
+cat >"$ant_temporary/listener-policy.yaml" <<EOF
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: $ant_listener_policy, namespace: $ANT_NAMESPACE}
+spec:
+  podSelector:
+    matchLabels: {platform.engineering-lab/purpose: known-listener, platform.engineering-lab/run-id: $ant_suffix}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {platform.engineering-lab/run-id: $ant_suffix}}
+      ports: [{protocol: TCP, port: 9090}]
+    - from:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: $ANT_NAMESPACE}}
+          podSelector:
+            matchLabels: {platform.engineering-lab/purpose: metrics-test, platform.engineering-lab/run-id: $ant_suffix}
+      ports: [{protocol: TCP, port: 9090}]
+EOF
+kubectl_lab create -f "$ant_temporary/listener-policy.yaml"
+kubectl_lab get networkpolicy "$ant_listener_policy" -n "$ANT_NAMESPACE" -o json >"$ant_temporary/listener-policy-created.json"
+ant_listener_policy_uid=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["metadata"]["uid"])' "$ant_temporary/listener-policy-created.json")
+ant_sanitize_file "$ant_temporary/listener-policy-created.json" "$ant_diagnostics/listener-policy-created.json"
+printf '[{"name":"listener-reachability","identity":"unrestricted-preflight","host":"%s","port":9090,"expected":"allow","mode":"tcp"}]\n' "$ant_listener_ip" >"$ant_temporary/preflight-cases.json"
+ant_preflight_overrides=$(python3 "$SCRIPT_DIR/app-network-probe.py" pod-overrides --node "$ant_worker" \
+  --image "$ant_image" --cases "$ant_temporary/preflight-cases.json" --timeout "$ANT_INNER_TIMEOUT_SECONDS")
+kubectl_lab run "$ant_preflight" -n kube-system --restart=Never --image="$ant_image" \
+  --labels="platform.engineering-lab/run-id=$ant_suffix" --overrides="$ant_preflight_overrides"
+ant_preflight_uid=$(kubectl_lab get pod "$ant_preflight" -n kube-system -o jsonpath='{.metadata.uid}')
+kubectl_lab wait -n kube-system --for=jsonpath='{.status.phase}'=Succeeded "pod/$ant_preflight" --timeout="${ANT_OUTER_TIMEOUT_SECONDS}s"
+python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-dir --base "$ant_artifact_base" --root "$ant_diagnostics" --path "$ant_diagnostics/pods/$ant_preflight"
+kubectl_lab logs "$ant_preflight" -n kube-system >"$ant_temporary/preflight.log"
+kubectl_lab get pod "$ant_preflight" -n kube-system -o json >"$ant_temporary/preflight.json"
+kubectl_lab describe pod "$ant_preflight" -n kube-system >"$ant_temporary/preflight-describe.txt"
+kubectl_lab get events -n kube-system --field-selector "involvedObject.name=$ant_preflight" -o json >"$ant_temporary/preflight-events.json"
+for ant_pf_file in preflight.log preflight.json preflight-describe.txt preflight-events.json; do
+  ant_sanitize_file "$ant_temporary/$ant_pf_file" "$ant_diagnostics/pods/$ant_preflight/$ant_pf_file"
+  [ -s "$ant_diagnostics/pods/$ant_preflight/$ant_pf_file" ] || die 'Listener reachability diagnostics are incomplete; preserving resources.'
+done
+python3 "$SCRIPT_DIR/cleanup-kubernetes-resource.py" cleanup --context "$EXPECTED_CONTEXT" --kind pod \
+  --namespace kube-system --name "$ant_preflight" --uid "$ant_preflight_uid" \
+  --timeout-seconds "$ANT_OUTER_TIMEOUT_SECONDS" --output "$ant_diagnostics/cleanup/pod-$ant_preflight.json"
+ant_validate_cleanup_evidence pod "$ant_preflight" || die 'Listener reachability Pod cleanup was not proven.'
+
 cat >"$ant_temporary/runtime-identities.json" <<EOF
 {"runId":"$ant_suffix","namespace":"$ANT_NAMESPACE","image":"$ant_image","imageIDs":$(printf '%s\n' "$ant_image_ids" | python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.stdin if x.strip()]))'),"workers":["$ant_worker","$ant_other_worker"],"applicationServiceIP":"$ant_service_ip","applicationPodIP":"$ant_app_pod_ip","kubernetesAPI":{"address":"$ant_api_ip","port":$ant_api_port},"maximumSimultaneousTemporaryResources":$ANT_MAX_SIMULTANEOUS_RESOURCES}
 EOF
 kubectl_lab get pod,networkpolicy --namespace "$ANT_NAMESPACE" -o json >"$ant_temporary/observability-before.json"
+kubectl_lab get networkpolicy --namespace "$APP_NAMESPACE" -o json >"$ant_temporary/platform-apps-before.json"
 cat >"$ant_temporary/policy.yaml" <<EOF
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -273,11 +356,36 @@ kubectl_lab get networkpolicy "$ant_policy" --namespace "$ANT_NAMESPACE" -o json
 ant_policy_uid=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["metadata"]["uid"])' "$ant_temporary/policy-created.json")
 [ -n "$ant_policy_uid" ] || die 'Temporary NetworkPolicy UID is missing.'
 ant_sanitize_file "$ant_temporary/policy-created.json" "$ant_diagnostics/policy-created.json"
+cat >"$ant_temporary/ingress-policy.yaml" <<EOF
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: $ant_ingress_policy
+  namespace: $APP_NAMESPACE
+  labels: {app.kubernetes.io/managed-by: platform-engineering-lab, platform.engineering-lab/run-id: $ant_suffix}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/instance: $APP_RELEASE, app.kubernetes.io/name: $APP_NAME}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: $ANT_NAMESPACE}}
+          podSelector:
+            matchLabels: {platform.engineering-lab/purpose: metrics-test, platform.engineering-lab/run-id: $ant_suffix}
+      ports: [{protocol: TCP, port: 8080}]
+EOF
+kubectl_lab create -f "$ant_temporary/ingress-policy.yaml"
+kubectl_lab get networkpolicy "$ant_ingress_policy" -n "$APP_NAMESPACE" -o json >"$ant_temporary/ingress-policy-created.json"
+ant_ingress_policy_uid=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["metadata"]["uid"])' "$ant_temporary/ingress-policy-created.json")
+ant_sanitize_file "$ant_temporary/ingress-policy-created.json" "$ant_diagnostics/ingress-policy-created.json"
 ant_capture_context
+ant_capture_pod "$ant_listener"
+ant_sanitize_pod "$ant_listener"
+ant_validate_pod_diagnostics "$ant_listener" || die 'Listener diagnostics are incomplete before probing.'
 ant_validate_shared_diagnostics || die 'Shared NetworkPolicy diagnostics are incomplete before probing.'
 
 cat >"$ant_temporary/approved-cases.json" <<EOF
-[{"name":"approved-internal-metrics","identity":"approved-observability","host":"$ant_service_ip","port":80,"expected":"allow","mode":"http","path":"/metrics","expected_status":200,"body_contains":"golden_path_http_requests_total"},{"name":"approved-outside-flow-deny","identity":"approved-observability","host":"$ant_app_pod_ip","port":8081,"expected":"deny","mode":"tcp"},{"name":"approved-internet-deny","identity":"approved-observability","host":"1.1.1.1","port":443,"expected":"deny","mode":"tcp"},{"name":"approved-kubernetes-api-deny","identity":"approved-observability","host":"$ant_api_ip","port":$ant_api_port,"expected":"deny","mode":"tcp"}]
+[{"name":"approved-internal-metrics","identity":"approved-observability","host":"$ant_service_ip","port":80,"expected":"allow","mode":"http","path":"/metrics","expected_status":200,"body_contains":"golden_path_http_requests_total"},{"name":"approved-outside-flow-deny","identity":"approved-observability","host":"$ant_listener_ip","port":9090,"expected":"deny","mode":"tcp"},{"name":"approved-internet-deny","identity":"approved-observability","host":"1.1.1.1","port":443,"expected":"deny","mode":"tcp"},{"name":"approved-kubernetes-api-deny","identity":"approved-observability","host":"$ant_api_ip","port":$ant_api_port,"expected":"deny","mode":"tcp"}]
 EOF
 cat >"$ant_temporary/denied-cases.json" <<EOF
 [{"name":"unapproved-internal-metrics-deny","identity":"unapproved-observability","host":"$ant_service_ip","port":80,"expected":"deny","mode":"http","path":"/metrics","expected_status":200},{"name":"unapproved-internet-deny","identity":"unapproved-observability","host":"1.1.1.1","port":443,"expected":"deny","mode":"tcp"},{"name":"unapproved-kubernetes-api-deny","identity":"unapproved-observability","host":"$ant_api_ip","port":$ant_api_port,"expected":"deny","mode":"tcp"}]
@@ -361,6 +469,8 @@ for ant_public_case in metrics live ready; do
 done
 
 ant_capture_context
+ant_capture_pod "$ant_listener"
+ant_sanitize_pod "$ant_listener"
 if ant_validate_global_diagnostics; then
   :
 else
@@ -373,10 +483,12 @@ if ! ant_cleanup_resource networkpolicy "$ant_policy" "$ant_policy_uid" ||
 fi
 ant_policy_uid=''
 kubectl_lab get pod,networkpolicy --namespace "$ANT_NAMESPACE" -o json >"$ant_temporary/observability-after.json"
-python3 - "$ant_temporary/observability-before.json" "$ant_temporary/observability-after.json" "$ant_suffix" <<'PY'
+kubectl_lab get networkpolicy --namespace "$APP_NAMESPACE" -o json >"$ant_temporary/platform-apps-after.json"
+python3 - "$ant_temporary/observability-before.json" "$ant_temporary/observability-after.json" \
+  "$ant_temporary/platform-apps-before.json" "$ant_temporary/platform-apps-after.json" "$ant_suffix" <<'PY'
 import json, sys
-before, after = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:3])
-suffix = sys.argv[3]
+before, after, app_before, app_after = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:5])
+suffix = sys.argv[5]
 def normalize(value):
     result = {}
     for item in value["items"]:
@@ -392,6 +504,10 @@ if normalize(before) != normalize(after):
     raise SystemExit("an unrelated observability Pod or NetworkPolicy changed")
 if any(item["metadata"]["name"].endswith(suffix) for item in after["items"]):
     raise SystemExit("a temporary application network-test resource remains")
+if normalize(app_before) != normalize(app_after):
+    raise SystemExit("an unrelated platform-apps NetworkPolicy changed")
+if any(item["metadata"]["name"].endswith(suffix) for item in app_after["items"]):
+    raise SystemExit("a temporary platform-apps NetworkPolicy remains")
 print("PASS  all exact temporary resources are absent and unrelated observability resources are unchanged.")
 PY
 
