@@ -57,10 +57,22 @@ def self_test() -> None:
         try: ensure_directory(str(base), str(root), str(root / ".." / "escaped"))
         except ValueError: pass
         else: raise AssertionError("traversal escaped the run directory")
+        collision = pathlib.Path(str(root) + "-other")
+        try: ensure_directory(str(base), str(root), str(collision))
+        except ValueError: pass
+        else: raise AssertionError("prefix-collision directory escaped the run directory")
+        outside = pathlib.Path(temporary) / "outside"
+        try: ensure_directory(str(base), str(root), str(outside))
+        except ValueError: pass
+        else: raise AssertionError("absolute outside path escaped the run directory")
         link = root / "linked"; link.symlink_to(pathlib.Path(temporary))
         try: ensure_directory(str(base), str(root), str(link / "child"))
         except ValueError: pass
         else: raise AssertionError("symlink traversal was accepted")
+        fifo = root / "fifo"; os.mkfifo(fifo)
+        try: ensure_output(str(base), str(root), str(fifo))
+        except ValueError: pass
+        else: raise AssertionError("special-file output was accepted")
     print("PASS  diagnostic paths support safe unusual names and reject collisions, traversal, symlinks, and non-directory components.")
 
 

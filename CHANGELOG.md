@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file. The format 
 
 - A separately confirmed sequential kindnet recovery command with two-worker functional policy verification, checksummed evidence, and exact `app=kindnet` selector, ownership, readiness, runtime-image, and node-order validation.
 - Exact interactive confirmations now use one shared POSIX shell helper; kindnet recovery loads it directly and rejects empty, EOF, whitespace-altered, partial, additional, and stale identities before deletion.
+- Kindnet enforcement evidence now uses an explicitly validated artifact boundary, and `kindnet-policy-validate` proves current Pod identity, watcher health, DNS, and two-worker policy behavior without restarting kindnet.
 - Repository-local, checksum-pinned Argo CD v3.5.2 CLI provisioning for guarded diff and synchronization commands.
 - Fail-closed runtime discovery, identity checks, exact `/32` Argo API policies, and worker-pinned network preflight tests for kind/kindnet.
 - A manually dispatched, source-run-bound GHCR publication gate that cannot rebuild, promote, or contact Kubernetes.

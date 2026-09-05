@@ -14,7 +14,9 @@ def main():
     assert harness.index("capture_diagnostics") < harness.index("cleanup_resources")
     assert "validate_diagnostics" in harness and "diagnostics_complete=1" in harness
     assert "if validate_diagnostics" in harness and "[ -s \"$diagnostics/" in harness
-    assert ".artifacts/gitops-network" in harness
+    assert 'gnt_global_artifact_base=$REPOSITORY_ROOT/.artifacts' in harness
+    assert 'GITOPS_NETWORK_ARTIFACT_BASE:-$gnt_global_artifact_base/gitops-network' in harness
+    assert 'ensure-dir --base "$gnt_global_artifact_base" --root "$gnt_artifact_base"' in harness
     assert all(name in harness for name in ("pod.json", "pod.log", "describe.txt", "events.json", "networkpolicies.yaml", "endpoint-identity.json", "node.json"))
     assert harness.count("run_case ") >= 12
     assert "automountServiceAccountToken" in (ROOT / "scripts/network-probe.py").read_text()

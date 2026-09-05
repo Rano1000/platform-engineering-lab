@@ -45,6 +45,8 @@ python3 scripts/cleanup-kubernetes-resource.py self-test
 python3 scripts/test-gitops-network-harness.py
 python3 scripts/test-app-network-harness.py
 python3 scripts/test-kindnet-recovery.py
+python3 scripts/test-kindnet-policy-validation.py
+python3 scripts/kindnet-dns-probe.py self-test
 python3 scripts/test-confirmation-entrypoints.py
 python3 scripts/test-gitops-install.py
 python3 scripts/validate-default-appproject.py self-test

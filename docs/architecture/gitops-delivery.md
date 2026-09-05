@@ -27,7 +27,7 @@ The child `golden-path-api` Application uses the separate `platform-apps` projec
 
 The application chart owns resources only in `platform-apps`, and its permanent ingress policy trusts only Traefik. The guarded network test creates matching, run-specific metrics ingress and egress policies; neither namespace permanently trusts a generic metrics-client label.
 
-Kindnet readiness is not used as proof of NetworkPolicy enforcement. A standalone preflight exercises bounded allow and deny flows from both workers. `make kindnet-policy-recover` is a separate, confirmed operation for sequential replacement of verified kindnet Pods and is never called automatically.
+Kindnet readiness is not used as proof of NetworkPolicy enforcement. A standalone preflight exercises bounded allow and deny flows from both workers. `make kindnet-policy-recover` is a separate, confirmed operation for sequential replacement of verified kindnet Pods and is never called automatically. `make kindnet-policy-validate` revalidates freshly discovered replacement identities, watcher health, DNS, and enforcement without restarting kindnet; its temporary resources use diagnostic-first, exact-UID cleanup.
 
 Controller installation retains Argo CD's built-in `default` AppProject but replaces its permissions with a repository-owned deny-all specification. It contains no permitted repositories, destinations, or resource kinds. This prevents an unreviewed Application from bypassing the dedicated bootstrap and workload project boundaries.
 

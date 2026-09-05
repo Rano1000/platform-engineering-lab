@@ -62,6 +62,7 @@ kubectl_lab logs -n "$KPR_NAMESPACE" -l app=kindnet --all-containers --since=15m
 python3 "$SCRIPT_DIR/redact-network-diagnostics.py" --sanitize "$kpr_raw/daemonset-after.json" "$kpr_root/after/daemonset.json"
 python3 "$SCRIPT_DIR/redact-network-diagnostics.py" --sanitize "$kpr_raw/pods-after.json" "$kpr_root/after/pods.json"
 python3 "$SCRIPT_DIR/redact-network-diagnostics.py" --sanitize "$kpr_raw/kindnet-after.log" "$kpr_root/after/kindnet.log"
-"$SCRIPT_DIR/test-kindnet-policy.sh"
+KINDNET_POLICY_ARTIFACT_BASE="$kpr_root" KINDNET_POLICY_EVIDENCE_ROOT="$kpr_root/enforcement" \
+  "$SCRIPT_DIR/test-kindnet-policy.sh"
 python3 "$SCRIPT_DIR/validate-kindnet-recovery.py" manifest --root "$kpr_root"
 printf 'PASS  guarded sequential kindnet policy recovery completed. Evidence: %s\n' "$kpr_root"

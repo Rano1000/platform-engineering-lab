@@ -15,7 +15,8 @@ require_lab_runtime
 require_app_release
 temporary=$(mktemp -d)
 suffix="$(date +%s)-$$"
-gnt_artifact_base=$REPOSITORY_ROOT/.artifacts/gitops-network
+gnt_global_artifact_base=$REPOSITORY_ROOT/.artifacts
+gnt_artifact_base=${GITOPS_NETWORK_ARTIFACT_BASE:-$gnt_global_artifact_base/gitops-network}
 diagnostics=${GITOPS_NETWORK_DIAGNOSTICS:-$gnt_artifact_base/$suffix}
 listener="argocd-api-negative-$suffix"
 listener_policy=$listener
@@ -26,6 +27,7 @@ cleanup_failed=0
 created_pod_cleanup_attempted=0
 identity=''
 worker=''
+python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-dir --base "$gnt_global_artifact_base" --root "$gnt_artifact_base" --path "$gnt_artifact_base"
 python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-dir --base "$gnt_artifact_base" --root "$diagnostics" --path "$diagnostics/pods"
 python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-dir --base "$gnt_artifact_base" --root "$diagnostics" --path "$diagnostics/cleanup"
 

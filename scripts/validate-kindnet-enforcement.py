@@ -16,12 +16,18 @@ def main():
   logs=pathlib.Path(a.logs).read_text(encoding="utf-8",errors="replace")
   if ERRORS.search(logs): raise SystemExit("kindnet watcher/API errors exist in the bounded preflight window")
   return
- root=pathlib.Path(a.root).resolve(); assert root.is_dir() and not root.is_symlink()
+ root=pathlib.Path(a.root); assert root.is_absolute() and root.is_dir() and not root.is_symlink()
  for index in (0,1):
   worker=root/f"worker-{index}"; assert (worker/"evidence-manifest.json").is_file()
+  dns=list(root.glob(f"kindnet-dns-{index}-*"))
+  required=("created.json","log","pod.json","describe","events.json","cleanup.json")
+  prefixes={str(path).rsplit("-",1)[0] for path in dns if path.name.endswith("-created.json")}
+  assert len(prefixes)==1
+  prefix=pathlib.Path(next(iter(prefixes)))
+  assert all(pathlib.Path(f"{prefix}-{suffix}").is_file() for suffix in required)
  files={}
  for path in sorted(root.rglob("*")):
-  if path.name=="evidence-manifest.json": continue
+  if path==root/"evidence-manifest.json": continue
   assert not path.is_symlink() and (path.is_dir() or path.is_file())
   if path.is_file(): files[str(path.relative_to(root))]=hashlib.sha256(path.read_bytes()).hexdigest()
  tmp=root/".manifest.tmp"; tmp.write_text(json.dumps({"schemaVersion":1,"files":files},sort_keys=True,separators=(",",":"))+"\n"); os.replace(tmp,root/"evidence-manifest.json")
