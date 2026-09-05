@@ -8,6 +8,8 @@ SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/lib/app-common.sh"
 # shellcheck source=SCRIPTDIR/lib/gitops-common.sh
 . "$SCRIPT_DIR/lib/gitops-common.sh"
+# shellcheck source=SCRIPTDIR/lib/diagnostic-common.sh
+. "$SCRIPT_DIR/lib/diagnostic-common.sh"
 
 INNER_TIMEOUT_SECONDS=2
 OUTER_TIMEOUT_SECONDS=20
@@ -43,10 +45,10 @@ capture_pod() (
   gnt_capture_raw=$temporary/pod-raw/$gnt_capture_pod
   mkdir -p "$gnt_capture_raw"
   if kubectl_lab get pod "$gnt_capture_pod" --namespace "$ARGOCD_NAMESPACE" >/dev/null 2>&1; then
-    kubectl_lab logs "$gnt_capture_pod" --namespace "$ARGOCD_NAMESPACE" >"$gnt_capture_raw/pod.log" 2>&1 || true
-    kubectl_lab get pod "$gnt_capture_pod" --namespace "$ARGOCD_NAMESPACE" -o json >"$gnt_capture_raw/pod.json"
-    kubectl_lab describe pod "$gnt_capture_pod" --namespace "$ARGOCD_NAMESPACE" >"$gnt_capture_raw/describe.txt" 2>&1 || true
-    kubectl_lab get events --namespace "$ARGOCD_NAMESPACE" --field-selector "involvedObject.name=$gnt_capture_pod" -o json >"$gnt_capture_raw/events.json"
+    kubectl_lab logs "$gnt_capture_pod" --namespace "$ARGOCD_NAMESPACE" >"$gnt_capture_raw/$(diagnostic_artifact_name '' log)" 2>&1 || true
+    kubectl_lab get pod "$gnt_capture_pod" --namespace "$ARGOCD_NAMESPACE" -o json >"$gnt_capture_raw/$(diagnostic_artifact_name '' pod)"
+    kubectl_lab describe pod "$gnt_capture_pod" --namespace "$ARGOCD_NAMESPACE" >"$gnt_capture_raw/$(diagnostic_artifact_name '' describe)" 2>&1 || true
+    kubectl_lab get events --namespace "$ARGOCD_NAMESPACE" --field-selector "involvedObject.name=$gnt_capture_pod" -o json >"$gnt_capture_raw/$(diagnostic_artifact_name '' events)"
   fi
 )
 
@@ -56,7 +58,8 @@ sanitize_pod() (
   gnt_sanitize_destination=$diagnostics/pods/$gnt_sanitize_pod
   [ -d "$gnt_sanitize_raw" ] || return 0
   python3 "$SCRIPT_DIR/validate-diagnostic-path.py" ensure-dir --base "$gnt_artifact_base" --root "$diagnostics" --path "$gnt_sanitize_destination"
-  for gnt_sanitize_name in pod.log pod.json describe.txt events.json; do
+  for gnt_sanitize_kind in log pod describe events; do
+    gnt_sanitize_name=$(diagnostic_artifact_name '' "$gnt_sanitize_kind")
     [ -f "$gnt_sanitize_raw/$gnt_sanitize_name" ] || continue
     sanitize_file "$gnt_sanitize_raw/$gnt_sanitize_name" "$gnt_sanitize_destination/$gnt_sanitize_name"
   done

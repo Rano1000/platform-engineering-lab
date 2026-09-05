@@ -17,6 +17,8 @@ def main():
     assert 'gnt_global_artifact_base=$REPOSITORY_ROOT/.artifacts' in harness
     assert 'GITOPS_NETWORK_ARTIFACT_BASE:-$gnt_global_artifact_base/gitops-network' in harness
     assert 'ensure-dir --base "$gnt_global_artifact_base" --root "$gnt_artifact_base"' in harness
+    assert '. "$SCRIPT_DIR/lib/diagnostic-common.sh"' in harness
+    assert all(f"diagnostic_artifact_name '' {kind}" in harness for kind in ("log", "pod", "describe", "events"))
     assert all(name in harness for name in ("pod.json", "pod.log", "describe.txt", "events.json", "networkpolicies.yaml", "endpoint-identity.json", "node.json"))
     assert harness.count("run_case ") >= 12
     assert "automountServiceAccountToken" in (ROOT / "scripts/network-probe.py").read_text()

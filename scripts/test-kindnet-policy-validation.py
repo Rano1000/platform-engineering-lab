@@ -13,6 +13,7 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PATH_VALIDATOR = ROOT / "scripts/validate-diagnostic-path.py"
 EVIDENCE_VALIDATOR = ROOT / "scripts/validate-kindnet-enforcement.py"
+DIAGNOSTIC_COMMON = ROOT / "scripts/lib/diagnostic-common.sh"
 
 
 def run(*arguments: str, ok: bool = True) -> subprocess.CompletedProcess[str]:
@@ -66,13 +67,18 @@ def main() -> None:
         for name in ("daemonset.json", "pods.json", "kindnet.log", "identity.json"):
             (enforcement / name).write_text("{}\n")
         for index in (0, 1):
-            prefix = enforcement / f"kindnet-dns-{index}-fixture"
-            for suffix in ("created.json", "log", "pod.json", "describe", "events.json", "cleanup.json"):
-                pathlib.Path(f"{prefix}-{suffix}").write_text("{}\n")
+            name = f"kindnet-dns-{index}-fixture"
+            files = {kind: f"{name}.{suffix}" for kind, suffix in {
+                "created":"created.json", "log":"pod.log", "pod":"pod.json", "describe":"describe.txt",
+                "events":"events.json", "cleanup":"cleanup.json"}.items()}
+            for filename in files.values(): (enforcement / filename).write_text("{}\n")
+            (enforcement / f"{name}.artifacts.json").write_text(json.dumps({
+                "schemaVersion":1,"name":name,"namespace":"gitops","node":f"worker-{index}",
+                "uid":f"uid-{index}","files":files}, sort_keys=True)+"\n")
         run("python3", str(EVIDENCE_VALIDATOR), "evidence", "--root", str(enforcement))
         manifest = json.loads((enforcement / "evidence-manifest.json").read_text())
         assert manifest["schemaVersion"] == 1 and manifest["files"]
-        (enforcement / "kindnet-dns-0-fixture-log").unlink()
+        (enforcement / "kindnet-dns-0-fixture.describe.txt").unlink()
         run("python3", str(EVIDENCE_VALIDATOR), "evidence", "--root", str(enforcement), ok=False)
 
     harness = (ROOT / "scripts/test-kindnet-policy.sh").read_text(encoding="utf-8")
@@ -85,6 +91,7 @@ def main() -> None:
     assert "for knp_index in 0 1" in harness
     assert "kindnet-dns-probe.py\" pod-overrides" in harness
     assert "case $knp_dns_phase in Succeeded|Failed" in harness
+    assert harness.count("diagnostic_artifact_name") >= 8
     assert "retry" not in harness.lower()
     assert "rollout restart" not in harness and "delete daemonset" not in harness
     assert "kindnet-policy-validate:" in makefile
@@ -103,6 +110,45 @@ helper 'nested value'
 test "$caller_root" = 'approved root with spaces'
 """
     run("/bin/sh", "-c", shell)
+    canonical = subprocess.run([
+        "/bin/sh", "-c",
+        f'. {DIAGNOSTIC_COMMON!s}; '
+        'for kind in created log pod describe events cleanup; do diagnostic_artifact_name "pod safe_+1" "$kind"; done',
+    ], text=True, capture_output=True)
+    assert canonical.returncode != 0  # Spaces are safe in directories, not Kubernetes-derived artifact prefixes.
+    entry = subprocess.run([
+        "/bin/sh", "-c",
+        f'. {DIAGNOSTIC_COMMON!s}; '
+        'for kind in created log pod describe events cleanup; do diagnostic_artifact_name kindnet-dns-0-run_+1 "$kind"; done',
+    ], text=True, capture_output=True, check=True)
+    assert entry.stdout.splitlines() == [
+        "kindnet-dns-0-run_+1.created.json", "kindnet-dns-0-run_+1.pod.log",
+        "kindnet-dns-0-run_+1.pod.json", "kindnet-dns-0-run_+1.describe.txt",
+        "kindnet-dns-0-run_+1.events.json", "kindnet-dns-0-run_+1.cleanup.json",
+    ]
+    assert "kindnet-dns-0-1788566836-85685.describe" not in harness
+    assert "kindnet-dns-0-1788566836-85685-describe" not in harness
+    with tempfile.TemporaryDirectory(prefix="dns entry point ") as directory:
+        root = pathlib.Path(directory); raw = root / "raw"; evidence = root / "evidence"
+        raw.mkdir(); evidence.mkdir(); name = "kindnet-dns-0-posix_+1"
+        for suffix in ("created.json", "pod.log", "pod.json", "describe.txt", "events.json", "cleanup.json"):
+            (raw / f"{name}.{suffix}").write_text("{}\n")
+        entry_script = root / "entry.sh"
+        entry_script.write_text(
+            "#!/bin/sh\nset -eu\n"
+            f'. {DIAGNOSTIC_COMMON!s}\n'
+            "raw=$1 evidence=$2 name=$3 scripts=$4\n"
+            "for kind in created log pod describe events cleanup; do\n"
+            "  artifact=$(diagnostic_artifact_name \"$name\" \"$kind\")\n"
+            "  python3 \"$scripts/redact-network-diagnostics.py\" --sanitize \"$raw/$artifact\" \"$evidence/$artifact\"\n"
+            "done\n"
+            "python3 \"$scripts/validate-kindnet-enforcement.py\" dns-manifest --root \"$evidence\" "
+            "--name \"$name\" --node worker-1 --uid uid-1\n",
+            encoding="utf-8",
+        )
+        run("/bin/sh", str(entry_script), str(raw), str(evidence), name, str(ROOT / "scripts"))
+        record = json.loads((evidence / f"{name}.artifacts.json").read_text())
+        assert set(record["files"]) == {"created", "log", "pod", "describe", "events", "cleanup"}
     print("PASS  kindnet validation fixes the exact artifact-base defect and preserves strict path containment.")
     print("PASS  validation-only mode accepts fresh Pod identities, tests both workers, and cannot invoke recovery.")
 

@@ -5,6 +5,7 @@ ERRORS=re.compile(r"Failed to watch|failed to list|TLS handshake timeout|i/o tim
 def main():
  p=argparse.ArgumentParser(); s=p.add_subparsers(dest="cmd",required=True)
  q=s.add_parser("preflight"); q.add_argument("--daemonset"); q.add_argument("--pods"); q.add_argument("--logs")
+ q=s.add_parser("dns-manifest"); q.add_argument("--root"); q.add_argument("--name"); q.add_argument("--node"); q.add_argument("--uid")
  q=s.add_parser("evidence"); q.add_argument("--root")
  a=p.parse_args()
  if a.cmd=="preflight":
@@ -16,15 +17,20 @@ def main():
   logs=pathlib.Path(a.logs).read_text(encoding="utf-8",errors="replace")
   if ERRORS.search(logs): raise SystemExit("kindnet watcher/API errors exist in the bounded preflight window")
   return
+ if a.cmd=="dns-manifest":
+  root=pathlib.Path(a.root); kinds={"created":"created.json","log":"pod.log","pod":"pod.json","describe":"describe.txt","events":"events.json","cleanup":"cleanup.json"}
+  files={kind:f"{a.name}.{suffix}" for kind,suffix in kinds.items()}
+  assert all((root/name).is_file() and (root/name).stat().st_size>0 for name in files.values())
+  value={"schemaVersion":1,"name":a.name,"namespace":"gitops","node":a.node,"uid":a.uid,"files":files}
+  tmp=root/f".{a.name}.artifacts.tmp"; tmp.write_text(json.dumps(value,sort_keys=True,separators=(",",":"))+"\n"); os.replace(tmp,root/f"{a.name}.artifacts.json")
+  return
  root=pathlib.Path(a.root); assert root.is_absolute() and root.is_dir() and not root.is_symlink()
  for index in (0,1):
   worker=root/f"worker-{index}"; assert (worker/"evidence-manifest.json").is_file()
-  dns=list(root.glob(f"kindnet-dns-{index}-*"))
-  required=("created.json","log","pod.json","describe","events.json","cleanup.json")
-  prefixes={str(path).rsplit("-",1)[0] for path in dns if path.name.endswith("-created.json")}
-  assert len(prefixes)==1
-  prefix=pathlib.Path(next(iter(prefixes)))
-  assert all(pathlib.Path(f"{prefix}-{suffix}").is_file() for suffix in required)
+  manifests=list(root.glob(f"kindnet-dns-{index}-*.artifacts.json")); assert len(manifests)==1
+  record=json.loads(manifests[0].read_text()); assert record["node"] and record["uid"]
+  assert set(record["files"])=={"created","log","pod","describe","events","cleanup"}
+  assert all((root/name).is_file() and (root/name).stat().st_size>0 for name in record["files"].values())
  files={}
  for path in sorted(root.rglob("*")):
   if path==root/"evidence-manifest.json": continue
