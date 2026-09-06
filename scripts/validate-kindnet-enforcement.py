@@ -14,7 +14,8 @@ def load(path): return json.loads(pathlib.Path(path).read_text(encoding="utf-8")
 
 def validate_projection(path,kind):
  value=load(path)
- if value.get("schemaVersion")!=1 or value.get("projectionType")!=kind: fail(f"{path.name} is not a {kind} projection")
+ if value.get("kind") in {"DaemonSet","Pod","PodList","List"}: fail(f"projected evidence validator rejects raw Kubernetes objects in {path.name}")
+ if value.get("schemaVersion")!=1 or value.get("projectionType")!=kind: fail(f"{path.name} has the wrong projected schema or version for {kind}")
  if kind=="kindnet-pod-list" and (not isinstance(value.get("items"),list) or len(value["items"])!=3): fail("kindnet PodList projection must contain exactly three Pods")
  text=path.read_text(encoding="utf-8")
  for field in ('"env"','"envFrom"','"volumes"','"initContainers"','"ephemeralContainers"','"value"'):
@@ -22,6 +23,7 @@ def validate_projection(path,kind):
 
 def reject_raw_kindnet(value,relative):
  if not isinstance(value,dict): return
+ if value.get("schemaVersion")==1 and value.get("projectionType") in {"kindnet-daemonset","kindnet-pod","kindnet-pod-list"}: return
  metadata=value.get("metadata",{}) if isinstance(value.get("metadata",{}),dict) else {}
  labels=metadata.get("labels",{}) if isinstance(metadata.get("labels",{}),dict) else {}
  items=value.get("items",[]) if isinstance(value.get("items",[]),list) else []
@@ -62,7 +64,7 @@ def evidence(root,write_manifest=True):
  for path in root.rglob("*"):
   if path.is_symlink() or (not path.is_dir() and not path.is_file()): fail(f"unsafe evidence entry: {path}")
   if path.is_file() and path.stat().st_size==0: fail(f"empty evidence file: {path}")
- regular={p.name for p in root.iterdir() if p.is_file() and not p.name.startswith("kindnet-dns-")}
+ regular={p.name for p in root.iterdir() if p.is_file() and not p.name.startswith("kindnet-dns-") and p.name!="evidence-manifest.json"}
  if regular!=ROOT_FILES: fail("root evidence filenames are incomplete or unexpected")
  validate_projection(root/"daemonset.json","kindnet-daemonset")
  validate_projection(root/"pods.json","kindnet-pod-list")
@@ -90,7 +92,10 @@ def main():
  command=commands.add_parser("evidence"); command.add_argument("--root"); args=parser.parse_args()
  try:
   if args.cmd=="preflight":
-   daemonset,pods=load(args.daemonset),load(args.pods)["items"]
+   daemonset,pod_list=load(args.daemonset),load(args.pods); pods=pod_list.get("items",[])
+   if daemonset.get("projectionType") or pod_list.get("projectionType"): fail("raw readiness validation rejects projected evidence schemas")
+   if (daemonset.get("apiVersion"),daemonset.get("kind"))!=("apps/v1","DaemonSet"): fail("raw DaemonSet schema is required for readiness validation")
+   if (pod_list.get("apiVersion"),pod_list.get("kind")) not in {("v1","List"),("v1","PodList")}: fail("raw PodList schema is required for readiness validation")
    if daemonset["status"]["desiredNumberScheduled"]!=daemonset["status"]["numberReady"] or len(pods)!=3: fail("kindnet readiness differs")
    if len({pod["spec"]["nodeName"] for pod in pods})!=3: fail("kindnet Pods are not distributed")
    if any(pod["status"]["phase"]!="Running" or pod["status"]["containerStatuses"][0]["ready"] is not True for pod in pods): fail("kindnet Pod is not Ready")

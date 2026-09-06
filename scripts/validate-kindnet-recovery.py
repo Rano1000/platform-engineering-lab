@@ -27,6 +27,15 @@ def load(path):
     return json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
 
 
+def require_raw(daemonset, pods):
+    if daemonset.get("projectionType") or pods.get("projectionType"):
+        fail("raw kindnet validation rejects projected evidence schemas")
+    if (daemonset.get("apiVersion"), daemonset.get("kind")) != ("apps/v1", "DaemonSet"):
+        fail("raw kindnet DaemonSet schema is required")
+    if (pods.get("apiVersion"), pods.get("kind")) not in {("v1", "List"), ("v1", "PodList")}:
+        fail("raw Kubernetes PodList schema is required")
+
+
 def ordered_pods(value):
     items = value.get("items", value) if isinstance(value, dict) else value
     by_node = {}
@@ -124,7 +133,9 @@ def main():
     args = parser.parse_args()
     try:
         if args.cmd == "preflight":
-            value = identity(load(args.daemonset), load(args.pods)["items"], args.image)
+            daemonset, pods = load(args.daemonset), load(args.pods)
+            require_raw(daemonset, pods)
+            value = identity(daemonset, pods["items"], args.image)
             pathlib.Path(args.output).write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
             return
         value = load(args.identity) if hasattr(args, "identity") else None

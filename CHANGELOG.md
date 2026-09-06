@@ -33,6 +33,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Separate private raw kindnet readiness inputs from versioned retained projections so post-projection consumers cannot request raw Kubernetes workload fields.
 - Project every kindnet DaemonSet, PodList, and Pod artifact onto an exact credential-safe schema, and inventory the complete 158-file enforcement tree before atomically creating its manifest.
 - Make application network probes always emit structured failures, replace closed-port denial checks with a proven listener, and use exact temporary metrics ingress and egress policies.
 - Add fail-closed policy-only reconciliation for kind API endpoint drift and require Pod-level Argo readiness instead of trusting rollout status alone.

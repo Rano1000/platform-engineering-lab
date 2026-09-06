@@ -97,6 +97,11 @@ def main() -> None:
             assert json.loads(projected_text)["projectionType"] in {"kindnet-pod", "kindnet-pod-list"}
             assert all(item not in projected_text for item in ('"env"', '"envFrom"', '"volumes"', '"serviceAccountToken"', '"value"'))
             subprocess.run(["python3", str(SCANNER), str(output)], check=True, capture_output=True)
+        source.write_text(json.dumps(pod_fixture()), encoding="utf-8"); invoke(source, output, True)
+        projected_pod = json.loads(output.read_text())["pod"]
+        assert projected_pod["nodeName"] == "platform-engineering-lab-worker"
+        assert projected_pod["metadata"]["name"] == "kindnet-fixture" and projected_pod["metadata"]["uid"] == "uid-kindnet-fixture"
+        assert projected_pod["container"]["ready"] is True and projected_pod["container"]["restartCount"] == 0
 
         cases = [
             changed(fixture(), lambda c: c["env"].pop()),
@@ -128,6 +133,8 @@ def main() -> None:
             bad_source, bad_output = root / f"bad-pod-{index}.json", root / f"bad-pod-{index}-output.json"
             bad_source.write_text(json.dumps(value), encoding="utf-8"); invoke(bad_source, bad_output, False)
             assert not bad_output.exists()
+        wrong_schema = pod_fixture(); wrong_schema["apiVersion"] = "v2"
+        source.write_text(json.dumps(wrong_schema), encoding="utf-8"); invoke(source, output, False)
 
         sentinel = root / "incomplete-evidence.json"
         sentinel.write_text('{"incomplete":true}\n', encoding="utf-8"); before = digest(sentinel)

@@ -113,6 +113,18 @@ def main():
         plan = run("plan", "--identity", str(identity_path)).stdout.splitlines()
         assert [line.split("|")[0] for line in plan] == list(NODES)
 
+        projected = {"schemaVersion": 1, "projectionType": "kindnet-pod-list", "items": [{"nodeName": node} for node in NODES]}
+        projected_result = run(
+            "preflight", "--daemonset", str(write(root, "projected-ds-source.json", daemonset)),
+            "--pods", str(write(root, "projected-pod-list.json", projected)), "--image", IMAGE,
+            "--output", str(root / "projected-identity.json"), ok=False,
+        )
+        assert "rejects projected evidence schemas" in projected_result.stderr
+        missing_node = copy.deepcopy(pods); del missing_node["items"][0]["spec"]["nodeName"]
+        rejected_preflight(root, daemonset, missing_node, "missing-node")
+        missing_status = copy.deepcopy(pods); del missing_status["items"][0]["status"]["containerStatuses"]
+        rejected_preflight(root, daemonset, missing_status, "missing-container-status")
+
         mutations = []
         old_selector = copy.deepcopy(daemonset)
         old_selector["spec"]["selector"] = {"matchLabels": {"k8s-app": "kindnet"}}

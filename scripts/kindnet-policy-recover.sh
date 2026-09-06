@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd)
 # shellcheck source=SCRIPTDIR/lib/cluster-common.sh
@@ -12,7 +13,16 @@ KPR_TIMEOUT_SECONDS=120
 kpr_run_id="$(date +%s)-$$"
 kpr_root=$REPOSITORY_ROOT/.artifacts/kindnet-policy-recovery/$kpr_run_id
 kpr_raw=$(mktemp -d)
-trap 'rm -rf "$kpr_raw"' EXIT HUP INT TERM
+kpr_cleanup_raw() {
+  kpr_raw_status=$?
+  trap - EXIT HUP INT TERM
+  rm -rf "$kpr_raw"
+  exit "$kpr_raw_status"
+}
+trap kpr_cleanup_raw EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 require_command kubectl
 require_expected_context
