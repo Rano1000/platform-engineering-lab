@@ -44,7 +44,7 @@ After a recovery has replaced Pods, use `make kindnet-policy-validate` only unde
 
 If DNS succeeds but evidence capture reports a missing diagnostic suffix, preserve the Pod and evidence. Canonical names are now returned by the shared diagnostic helper for both capture and sanitization; accepting legacy alternatives or manually renaming incomplete evidence would bypass completeness validation.
 
-If completed kindnet assertions stop because the DaemonSet `env` field is rejected, preserve the incomplete evidence directory. Kindnet uses a dedicated projection that validates the pinned source environment exactly, retains only the approved downward-API field references, and omits pinned literal configuration. Do not relax the general credential scanner or edit old evidence to make it pass.
+If completed kindnet assertions stop because a DaemonSet or Pod `env` field is rejected, preserve the incomplete evidence directory. Kindnet routes its DaemonSet, PodList, and individual Pod evidence through one projector that validates the pinned source environment, retains only approved downward-API references, and omits literal and volume configuration. The final inventory rejects unknown files, unprojected kindnet workloads, missing worker evidence, or fewer than 30 cleanup records. Do not relax the general credential scanner or edit old evidence to make it pass.
 
 First review the root and child diffs. Because pruning is disabled, synchronizing the corrected chart does not delete the existing Helm-owned policy. A separate exact-resource runtime gate must record its UID and Helm ownership and delete only that named policy. The completed local adoption removed this obsolete fixture; a fresh environment that never installed the older chart will not have it.
 

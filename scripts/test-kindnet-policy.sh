@@ -24,7 +24,9 @@ python3 "$SCRIPT_DIR/validate-kindnet-recovery.py" preflight \
   --output "$knp_temporary/identity.json"
 python3 "$SCRIPT_DIR/project-kindnet-evidence.py" \
   --source "$knp_temporary/daemonset.json" --output "$knp_root/daemonset.json"
-for knp_file in pods.json kindnet.log identity.json; do
+python3 "$SCRIPT_DIR/project-kindnet-evidence.py" \
+  --source "$knp_temporary/pods.json" --output "$knp_root/pods.json"
+for knp_file in kindnet.log identity.json; do
   python3 "$SCRIPT_DIR/redact-network-diagnostics.py" --sanitize "$knp_temporary/$knp_file" "$knp_root/$knp_file"
 done
 python3 "$SCRIPT_DIR/validate-kindnet-enforcement.py" preflight \
@@ -79,6 +81,7 @@ for knp_index in 0 1; do
   python3 "$SCRIPT_DIR/validate-kindnet-enforcement.py" dns-manifest --root "$knp_root" \
     --name "$knp_name" --node "$knp_node" --uid "$knp_uid"
 done
+python3 "$SCRIPT_DIR/validate-kindnet-enforcement.py" inventory --root "$knp_root"
 find "$knp_root" -type f ! -name evidence-manifest.json -print0 | \
   xargs -0 python3 "$SCRIPT_DIR/redact-network-diagnostics.py"
 python3 "$SCRIPT_DIR/validate-kindnet-enforcement.py" evidence --root "$knp_root"

@@ -41,23 +41,32 @@ def fixture():
     items = []
     for index, node in enumerate(reversed(NODES)):
         items.append({
+            "apiVersion": "v1", "kind": "Pod",
             "metadata": {
-                "name": f"kindnet-{index}", "uid": f"uid-{node}",
-                "labels": {"app": "kindnet", "k8s-app": "kindnet", "tier": "node"},
+                "name": f"kindnet-{index}", "namespace": "kube-system", "uid": f"uid-{node}",
+                "labels": {"app": "kindnet", "k8s-app": "kindnet", "tier": "node", "controller-revision-hash": "hash", "pod-template-generation": "1"},
                 "ownerReferences": [{
                     "apiVersion": "apps/v1", "kind": "DaemonSet", "name": "kindnet",
                     "uid": "ds-uid", "controller": True,
                 }],
             },
-            "spec": {"nodeName": node, "containers": [{"image": IMAGE}]},
+            "spec": {"nodeName": node, "containers": [{"name": "kindnet-cni", "image": IMAGE, "env": [
+                {"name": "HOST_IP", "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "status.hostIP"}}},
+                {"name": "POD_IP", "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "status.podIP"}}},
+                {"name": "POD_SUBNET", "value": "10.244.0.0/16"},
+                {"name": "CONTROL_PLANE_ENDPOINT", "value": "platform-engineering-lab-control-plane:6443"},
+            ]}], "volumes": [
+                {"name": volume, "hostPath": {"path": "/safe"}} for volume in ("cni-cfg", "xtables-lock", "lib-modules", "nri-plugin")
+            ] + [{"name": "kube-api-access-abc12", "projected": {"sources": [{"serviceAccountToken": {}}, {"configMap": {}}, {"downwardAPI": {}}]}}]},
             "status": {
-                "phase": "Running",
+                "phase": "Running", "startTime": "2026-09-05T12:00:01Z", "conditions": [{"type": "Ready", "status": "True"}],
                 "containerStatuses": [{
-                    "image": IMAGE, "imageID": IMAGE_ID, "ready": True, "restartCount": 1,
+                    "name": "kindnet-cni", "image": IMAGE, "imageID": IMAGE_ID, "ready": True, "restartCount": 1,
+                    "state": {"running": {"startedAt": "2026-09-05T12:00:01Z"}},
                 }],
             },
         })
-    return daemonset, {"items": items}
+    return daemonset, {"apiVersion": "v1", "kind": "List", "items": items}
 
 
 def run(*args, ok=True):
@@ -183,7 +192,7 @@ def main():
     assert content.index("cleanup-kubernetes-resource.py") < content.index("test-kindnet-policy.sh")
     assert content.index("describe pod") < content.index("cleanup-kubernetes-resource.py")
     assert "Required confirmation: %s\\n" in content
-    assert content.count("project-kindnet-evidence.py") == 2
+    assert content.count("project-kindnet-evidence.py") == 5
     assert "-l app=kindnet" in content and "-l k8s-app=kindnet" not in content
     assert "--force" not in content and "rollout restart" not in content and "retry" not in content.lower()
     enforcement = (ROOT / "scripts/validate-kindnet-enforcement.py").read_text(encoding="utf-8")

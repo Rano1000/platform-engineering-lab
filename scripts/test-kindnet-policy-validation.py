@@ -22,6 +22,40 @@ def run(*arguments: str, ok: bool = True) -> subprocess.CompletedProcess[str]:
     return result
 
 
+def write_complete_tree(root: pathlib.Path) -> None:
+    (root / "daemonset.json").write_text(json.dumps({"schemaVersion": 1, "projectionType": "kindnet-daemonset", "daemonSet": {}}) + "\n")
+    projected_pod = {"metadata": {"name": "kindnet", "uid": "uid"}, "nodeName": "worker", "container": {"image": "pinned"}}
+    (root / "pods.json").write_text(json.dumps({"schemaVersion": 1, "projectionType": "kindnet-pod-list", "items": [projected_pod] * 3}) + "\n")
+    (root / "kindnet.log").write_text("watchers healthy\n")
+    (root / "identity.json").write_text('{"schemaVersion":1}\n')
+    for index in (0, 1):
+        worker = root / f"worker-{index}"; pods = worker / "pods"; cleanup = worker / "cleanup"
+        pods.mkdir(parents=True); cleanup.mkdir()
+        for filename in ("endpoint-identity.json", "endpointslices.json", "node.json"):
+            (worker / filename).write_text("{}\n")
+        (worker / "networkpolicies.yaml").write_text("items: []\n")
+        names = [f"assertion-{number}" for number in range(12)] + ["listener"]
+        for name in names:
+            directory = pods / name; directory.mkdir()
+            for filename in ("pod.json", "events.json"):
+                (directory / filename).write_text("{}\n")
+            (directory / "pod.log").write_text('{"exit_code":0}\n')
+            (directory / "describe.txt").write_text("safe description\n")
+        for number in range(14):
+            (cleanup / f"resource-{number}.json").write_text('{"success":true,"cleanupResult":"deleted"}\n')
+    for index in (0, 1):
+        name = f"kindnet-dns-{index}-fixture"
+        files = {kind: f"{name}.{suffix}" for kind, suffix in {
+            "created":"created.json", "log":"pod.log", "pod":"pod.json", "describe":"describe.txt",
+            "events":"events.json", "cleanup":"cleanup.json"}.items()}
+        for kind, filename in files.items():
+            content = '{"success":true,"cleanupResult":"deleted"}\n' if kind == "cleanup" else "{}\n"
+            (root / filename).write_text(content)
+        (root / f"{name}.artifacts.json").write_text(json.dumps({
+            "schemaVersion":1,"name":name,"namespace":"gitops","node":f"worker-{index}",
+            "uid":f"uid-{index}","files":files}, sort_keys=True)+"\n")
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="kindnet validation + safe_") as directory:
         artifacts = pathlib.Path(directory) / ".artifacts"
@@ -61,25 +95,33 @@ def main() -> None:
         )
         fifo.unlink(); link.unlink()
 
-        for index in (0, 1):
-            worker = enforcement / f"worker-{index}"; worker.mkdir(exist_ok=True)
-            (worker / "evidence-manifest.json").write_text('{"schemaVersion":1,"files":{}}\n')
-        for name in ("daemonset.json", "pods.json", "kindnet.log", "identity.json"):
-            (enforcement / name).write_text("{}\n")
-        for index in (0, 1):
-            name = f"kindnet-dns-{index}-fixture"
-            files = {kind: f"{name}.{suffix}" for kind, suffix in {
-                "created":"created.json", "log":"pod.log", "pod":"pod.json", "describe":"describe.txt",
-                "events":"events.json", "cleanup":"cleanup.json"}.items()}
-            for filename in files.values(): (enforcement / filename).write_text("{}\n")
-            (enforcement / f"{name}.artifacts.json").write_text(json.dumps({
-                "schemaVersion":1,"name":name,"namespace":"gitops","node":f"worker-{index}",
-                "uid":f"uid-{index}","files":files}, sort_keys=True)+"\n")
+        write_complete_tree(enforcement)
+        run("python3", str(EVIDENCE_VALIDATOR), "inventory", "--root", str(enforcement))
+        assert not (enforcement / "evidence-manifest.json").exists()
         run("python3", str(EVIDENCE_VALIDATOR), "evidence", "--root", str(enforcement))
         manifest = json.loads((enforcement / "evidence-manifest.json").read_text())
-        assert manifest["schemaVersion"] == 1 and manifest["files"]
+        assert manifest["schemaVersion"] == 1 and len(manifest["files"]) == 158
+        (enforcement / "evidence-manifest.json").unlink()
+        hidden = enforcement / "worker-0" / "pods" / "assertion-0" / "pod.json"
+        original = hidden.read_text()
+        hidden.write_text(json.dumps({"apiVersion":"v1","kind":"Pod","metadata":{"labels":{"app":"kindnet"}}})+"\n")
+        run("python3", str(EVIDENCE_VALIDATOR), "inventory", "--root", str(enforcement), ok=False)
+        assert not (enforcement / "evidence-manifest.json").exists()
+        hidden.write_text(original)
         (enforcement / "kindnet-dns-0-fixture.describe.txt").unlink()
         run("python3", str(EVIDENCE_VALIDATOR), "evidence", "--root", str(enforcement), ok=False)
+        assert not (enforcement / "evidence-manifest.json").exists()
+
+        # Unknown files and hidden unprojected kindnet workloads fail before atomic manifest creation.
+        (enforcement / "kindnet-dns-0-fixture.describe.txt").write_text("safe description\n")
+        (enforcement / "unexpected.json").write_text(json.dumps({"kind":"Pod","metadata":{"labels":{"app":"kindnet"}}})+"\n")
+        run("python3", str(EVIDENCE_VALIDATOR), "evidence", "--root", str(enforcement), ok=False)
+        assert not (enforcement / "evidence-manifest.json").exists()
+        (enforcement / "unexpected.json").unlink()
+        empty = enforcement / "worker-0" / "pods" / "assertion-0" / "pod.log"
+        empty.write_text("")
+        run("python3", str(EVIDENCE_VALIDATOR), "evidence", "--root", str(enforcement), ok=False)
+        assert not (enforcement / "evidence-manifest.json").exists()
 
     harness = (ROOT / "scripts/test-kindnet-policy.sh").read_text(encoding="utf-8")
     recovery = (ROOT / "scripts/kindnet-policy-recover.sh").read_text(encoding="utf-8")
@@ -92,6 +134,7 @@ def main() -> None:
     assert "kindnet-dns-probe.py\" pod-overrides" in harness
     assert "case $knp_dns_phase in Succeeded|Failed" in harness
     assert harness.count("diagnostic_artifact_name") >= 8
+    assert harness.count("project-kindnet-evidence.py") >= 2
     assert "retry" not in harness.lower()
     assert "rollout restart" not in harness and "delete daemonset" not in harness
     assert "kindnet-policy-validate:" in makefile

@@ -46,23 +46,32 @@ def fixture():
     pods = []
     for index, (node, uid) in enumerate(zip(NODES, UIDS)):
         pods.append({
+            "apiVersion": "v1", "kind": "Pod",
             "metadata": {
-                "name": f"kindnet-{index}", "uid": uid,
-                "labels": {"app": "kindnet", "k8s-app": "kindnet", "tier": "node"},
+                "name": f"kindnet-{index}", "namespace": "kube-system", "uid": uid,
+                "labels": {"app": "kindnet", "k8s-app": "kindnet", "tier": "node", "controller-revision-hash": "hash", "pod-template-generation": "1"},
                 "ownerReferences": [{
                     "apiVersion": "apps/v1", "kind": "DaemonSet", "name": "kindnet",
                     "uid": "ds-uid", "controller": True,
                 }],
             },
-            "spec": {"nodeName": node, "containers": [{"image": IMAGE}]},
+            "spec": {"nodeName": node, "containers": [{"name": "kindnet-cni", "image": IMAGE, "env": [
+                {"name": "HOST_IP", "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "status.hostIP"}}},
+                {"name": "POD_IP", "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "status.podIP"}}},
+                {"name": "POD_SUBNET", "value": "10.244.0.0/16"},
+                {"name": "CONTROL_PLANE_ENDPOINT", "value": "platform-engineering-lab-control-plane:6443"},
+            ]}], "volumes": [
+                {"name": volume, "hostPath": {"path": "/safe"}} for volume in ("cni-cfg", "xtables-lock", "lib-modules", "nri-plugin")
+            ] + [{"name": "kube-api-access-abc12", "projected": {"sources": [{"serviceAccountToken": {}}, {"configMap": {}}, {"downwardAPI": {}}]}}]},
             "status": {
-                "phase": "Running",
+                "phase": "Running", "startTime": "2026-09-05T12:00:01Z", "conditions": [{"type": "Ready", "status": "True"}],
                 "containerStatuses": [{
-                    "image": IMAGE, "imageID": IMAGE_ID, "ready": True, "restartCount": 0,
+                    "name": "kindnet-cni", "image": IMAGE, "imageID": IMAGE_ID, "ready": True, "restartCount": 0,
+                    "state": {"running": {"startedAt": "2026-09-05T12:00:01Z"}},
                 }],
             },
         })
-    return daemonset, {"items": pods}
+    return daemonset, {"apiVersion": "v1", "kind": "List", "items": pods}
 
 
 def pty_run(command: list[str], value: str | None, environment: dict[str, str]) -> subprocess.CompletedProcess:

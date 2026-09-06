@@ -35,6 +35,29 @@ def fixture() -> dict:
     }
 
 
+def pod_fixture(name: str = "kindnet-fixture") -> dict:
+    environment = copy.deepcopy(fixture()["spec"]["template"]["spec"]["containers"][0]["env"])
+    return {
+        "apiVersion": "v1", "kind": "Pod",
+        "metadata": {
+            "name": name, "namespace": "kube-system", "uid": f"uid-{name}",
+            "creationTimestamp": "2026-09-05T12:00:00Z",
+            "labels": {"app": "kindnet", "k8s-app": "kindnet", "tier": "node", "controller-revision-hash": "hash", "pod-template-generation": "1"},
+            "ownerReferences": [{"apiVersion": "apps/v1", "kind": "DaemonSet", "name": "kindnet", "uid": "daemonset-uid", "controller": True, "blockOwnerDeletion": True}],
+        },
+        "spec": {
+            "nodeName": "platform-engineering-lab-worker", "containers": [{"name": "kindnet-cni", "image": fixture()["spec"]["template"]["spec"]["containers"][0]["image"], "env": environment}],
+            "volumes": [
+                {"name": name, "hostPath": {"path": "/safe"}} for name in ("cni-cfg", "xtables-lock", "lib-modules", "nri-plugin")
+            ] + [{"name": "kube-api-access-abc12", "projected": {"sources": [{"serviceAccountToken": {"path": "token"}}, {"configMap": {"name": "kube-root-ca.crt"}}, {"downwardAPI": {"items": []}}]}}],
+        },
+        "status": {
+            "phase": "Running", "startTime": "2026-09-05T12:00:01Z", "conditions": [{"type": "Ready", "status": "True"}],
+            "containerStatuses": [{"name": "kindnet-cni", "image": fixture()["spec"]["template"]["spec"]["containers"][0]["image"], "imageID": "sha256:" + "1" * 64, "ready": True, "restartCount": 0, "state": {"running": {"startedAt": "2026-09-05T12:00:01Z"}}}],
+        },
+    }
+
+
 def digest(path: pathlib.Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -67,6 +90,14 @@ def main() -> None:
         subprocess.run(["python3", str(SCANNER), str(output)], check=True, capture_output=True)
         assert output.stat().st_mode & 0o777 == 0o600
 
+        for workload in (pod_fixture(), {"apiVersion": "v1", "kind": "PodList", "items": [pod_fixture("kindnet-a"), pod_fixture("kindnet-b")]}):
+            source.write_text(json.dumps(workload), encoding="utf-8")
+            invoke(source, output, True)
+            projected_text = output.read_text(encoding="utf-8")
+            assert json.loads(projected_text)["projectionType"] in {"kindnet-pod", "kindnet-pod-list"}
+            assert all(item not in projected_text for item in ('"env"', '"envFrom"', '"volumes"', '"serviceAccountToken"', '"value"'))
+            subprocess.run(["python3", str(SCANNER), str(output)], check=True, capture_output=True)
+
         cases = [
             changed(fixture(), lambda c: c["env"].pop()),
             changed(fixture(), lambda c: c["env"].append({"name": "EXTRA", "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "metadata.name"}}})),
@@ -84,6 +115,18 @@ def main() -> None:
             bad_source, bad_output = root / f"bad-{index}.json", root / f"bad-{index}-output.json"
             bad_source.write_text(json.dumps(value), encoding="utf-8")
             invoke(bad_source, bad_output, False)
+            assert not bad_output.exists()
+
+        pod_cases = []
+        for field in ("initContainers", "ephemeralContainers"):
+            value = pod_fixture(); value["spec"][field] = [{"name": "unexpected"}]; pod_cases.append(value)
+        value = pod_fixture(); value["spec"]["volumes"].append({"name": "secret", "secret": {"secretName": "x"}}); pod_cases.append(value)
+        value = pod_fixture(); value["spec"]["volumes"][-1]["projected"]["sources"].append({"secret": {"name": "x"}}); pod_cases.append(value)
+        value = pod_fixture(); value["spec"]["containers"].append(copy.deepcopy(value["spec"]["containers"][0])); pod_cases.append(value)
+        value = pod_fixture(); value["spec"]["containers"][0]["image"] = "unexpected:latest"; pod_cases.append(value)
+        for index, value in enumerate(pod_cases):
+            bad_source, bad_output = root / f"bad-pod-{index}.json", root / f"bad-pod-{index}-output.json"
+            bad_source.write_text(json.dumps(value), encoding="utf-8"); invoke(bad_source, bad_output, False)
             assert not bad_output.exists()
 
         sentinel = root / "incomplete-evidence.json"

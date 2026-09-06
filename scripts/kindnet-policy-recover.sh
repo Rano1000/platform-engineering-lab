@@ -25,7 +25,7 @@ python3 "$SCRIPT_DIR/validate-kindnet-recovery.py" preflight \
   --daemonset "$kpr_raw/daemonset.json" --pods "$kpr_raw/pods.json" --image "$KPR_IMAGE" \
   --output "$kpr_raw/identity.json"
 python3 "$SCRIPT_DIR/project-kindnet-evidence.py" --source "$kpr_raw/daemonset.json" --output "$kpr_root/before/daemonset.json"
-python3 "$SCRIPT_DIR/redact-network-diagnostics.py" --sanitize "$kpr_raw/pods.json" "$kpr_root/before/pods.json"
+python3 "$SCRIPT_DIR/project-kindnet-evidence.py" --source "$kpr_raw/pods.json" --output "$kpr_root/before/pods.json"
 python3 "$SCRIPT_DIR/redact-network-diagnostics.py" --sanitize "$kpr_raw/identity.json" "$kpr_root/before/identity.json"
 python3 "$SCRIPT_DIR/redact-network-diagnostics.py" --sanitize "$kpr_raw/kindnet.log" "$kpr_root/before/kindnet.log"
 
@@ -42,7 +42,9 @@ python3 "$SCRIPT_DIR/validate-kindnet-recovery.py" plan --identity "$kpr_raw/ide
   kubectl_lab logs "$kpr_name" -n "$KPR_NAMESPACE" >"$kpr_raw/$kpr_name.log" 2>&1 || true
   kubectl_lab describe pod "$kpr_name" -n "$KPR_NAMESPACE" >"$kpr_raw/$kpr_name.describe" 2>&1
   kubectl_lab get events -n "$KPR_NAMESPACE" --field-selector "involvedObject.uid=$kpr_uid" -o json >"$kpr_raw/$kpr_name.events.json"
-  for kpr_item in pod-current.json "$kpr_name.log" "$kpr_name.describe" "$kpr_name.events.json"; do
+  python3 "$SCRIPT_DIR/project-kindnet-evidence.py" \
+    --source "$kpr_raw/pod-current.json" --output "$kpr_root/before/$kpr_name/pod-current.json"
+  for kpr_item in "$kpr_name.log" "$kpr_name.describe" "$kpr_name.events.json"; do
     python3 "$SCRIPT_DIR/redact-network-diagnostics.py" --sanitize "$kpr_raw/$kpr_item" "$kpr_root/before/$kpr_name/$kpr_item"
   done
   python3 "$SCRIPT_DIR/cleanup-kubernetes-resource.py" cleanup --context "$EXPECTED_CONTEXT" \
@@ -60,9 +62,11 @@ kubectl_lab get daemonset "$KPR_DAEMONSET" -n "$KPR_NAMESPACE" -o json >"$kpr_ra
 kubectl_lab get pods -n "$KPR_NAMESPACE" -l app=kindnet -o json >"$kpr_raw/pods-after.json"
 kubectl_lab logs -n "$KPR_NAMESPACE" -l app=kindnet --all-containers --since=15m >"$kpr_raw/kindnet-after.log" 2>&1 || true
 python3 "$SCRIPT_DIR/project-kindnet-evidence.py" --source "$kpr_raw/daemonset-after.json" --output "$kpr_root/after/daemonset.json"
-python3 "$SCRIPT_DIR/redact-network-diagnostics.py" --sanitize "$kpr_raw/pods-after.json" "$kpr_root/after/pods.json"
+python3 "$SCRIPT_DIR/project-kindnet-evidence.py" --source "$kpr_raw/pods-after.json" --output "$kpr_root/after/pods.json"
 python3 "$SCRIPT_DIR/redact-network-diagnostics.py" --sanitize "$kpr_raw/kindnet-after.log" "$kpr_root/after/kindnet.log"
 KINDNET_POLICY_ARTIFACT_BASE="$kpr_root" KINDNET_POLICY_EVIDENCE_ROOT="$kpr_root/enforcement" \
   "$SCRIPT_DIR/test-kindnet-policy.sh"
+find "$kpr_root" -type f ! -name evidence-manifest.json -print0 | \
+  xargs -0 python3 "$SCRIPT_DIR/redact-network-diagnostics.py"
 python3 "$SCRIPT_DIR/validate-kindnet-recovery.py" manifest --root "$kpr_root"
 printf 'PASS  guarded sequential kindnet policy recovery completed. Evidence: %s\n' "$kpr_root"
