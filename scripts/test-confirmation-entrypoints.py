@@ -27,12 +27,18 @@ EXPECTED = "kind-platform-engineering-lab/kindnet/ds-uid/" + ",".join(UIDS)
 
 def fixture():
     daemonset = {
+        "apiVersion": "apps/v1", "kind": "DaemonSet",
         "metadata": {"name": "kindnet", "namespace": "kube-system", "uid": "ds-uid", "generation": 1},
         "spec": {
             "selector": {"matchLabels": {"app": "kindnet"}},
             "template": {
                 "metadata": {"labels": {"app": "kindnet", "k8s-app": "kindnet", "tier": "node"}},
-                "spec": {"containers": [{"image": IMAGE}]},
+                "spec": {"containers": [{"name": "kindnet-cni", "image": IMAGE, "env": [
+                    {"name": "HOST_IP", "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "status.hostIP"}}},
+                    {"name": "POD_IP", "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "status.podIP"}}},
+                    {"name": "POD_SUBNET", "value": "10.244.0.0/16"},
+                    {"name": "CONTROL_PLANE_ENDPOINT", "value": "platform-engineering-lab-control-plane:6443"},
+                ]}]},
             },
         },
         "status": {"desiredNumberScheduled": 3, "currentNumberScheduled": 3, "numberReady": 3},

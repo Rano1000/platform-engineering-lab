@@ -22,11 +22,13 @@ python3 "$SCRIPT_DIR/validate-kindnet-recovery.py" preflight \
   --daemonset "$knp_temporary/daemonset.json" --pods "$knp_temporary/pods.json" \
   --image docker.io/kindest/kindnetd:v20251212-v0.29.0-alpha-105-g20ccfc88 \
   --output "$knp_temporary/identity.json"
-for knp_file in daemonset.json pods.json kindnet.log identity.json; do
+python3 "$SCRIPT_DIR/project-kindnet-evidence.py" \
+  --source "$knp_temporary/daemonset.json" --output "$knp_root/daemonset.json"
+for knp_file in pods.json kindnet.log identity.json; do
   python3 "$SCRIPT_DIR/redact-network-diagnostics.py" --sanitize "$knp_temporary/$knp_file" "$knp_root/$knp_file"
 done
 python3 "$SCRIPT_DIR/validate-kindnet-enforcement.py" preflight \
-  --daemonset "$knp_root/daemonset.json" --pods "$knp_root/pods.json" --logs "$knp_root/kindnet.log"
+  --daemonset "$knp_temporary/daemonset.json" --pods "$knp_root/pods.json" --logs "$knp_root/kindnet.log"
 
 if [ "${KINDNET_POLICY_REQUIRE_CONFIRMATION:-0}" = 1 ]; then
   knp_confirmation=$(python3 "$SCRIPT_DIR/validate-kindnet-recovery.py" confirmation \

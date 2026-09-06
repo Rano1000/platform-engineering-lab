@@ -33,6 +33,7 @@ All notable changes to this project will be documented in this file. The format 
 
 ### Fixed
 
+- Project kindnet DaemonSet evidence onto an exact credential-safe schema so approved downward-API references remain inspectable without retaining literal environment values or weakening the global scanner.
 - Make application network probes always emit structured failures, replace closed-port denial checks with a proven listener, and use exact temporary metrics ingress and egress policies.
 - Add fail-closed policy-only reconciliation for kind API endpoint drift and require Pod-level Argo readiness instead of trusting rollout status alone.
 - Make the application NetworkPolicy test sequential, independently classified, diagnostics-first, and UID-aware; the hardened listener design uses at most five temporary resources at once.

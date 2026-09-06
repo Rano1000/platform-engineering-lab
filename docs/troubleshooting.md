@@ -44,6 +44,8 @@ After a recovery has replaced Pods, use `make kindnet-policy-validate` only unde
 
 If DNS succeeds but evidence capture reports a missing diagnostic suffix, preserve the Pod and evidence. Canonical names are now returned by the shared diagnostic helper for both capture and sanitization; accepting legacy alternatives or manually renaming incomplete evidence would bypass completeness validation.
 
+If completed kindnet assertions stop because the DaemonSet `env` field is rejected, preserve the incomplete evidence directory. Kindnet uses a dedicated projection that validates the pinned source environment exactly, retains only the approved downward-API field references, and omits pinned literal configuration. Do not relax the general credential scanner or edit old evidence to make it pass.
+
 First review the root and child diffs. Because pruning is disabled, synchronizing the corrected chart does not delete the existing Helm-owned policy. A separate exact-resource runtime gate must record its UID and Helm ownership and delete only that named policy. The completed local adoption removed this obsolete fixture; a fresh environment that never installed the older chart will not have it.
 
 After exact cleanup, `make app-network-test` creates a uniquely owned replacement only for the duration of validation. Type `app-network-policy-test` when prompted. If the command fails, do not rerun or clean resources manually. Inspect its unique directory under `.artifacts/app-network/`. Diagnostics are captured and sanitized before UID-aware cleanup; incomplete evidence deliberately preserves the exact affected resource. Cleanup JSON distinguishes successful deletion, verified absence races, UID reuse, authorization failures, API failures, and timeouts.
