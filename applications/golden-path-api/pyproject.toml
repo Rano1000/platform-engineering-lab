@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Reference API for the platform engineering lab"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-  "fastapi==0.141.1",
+  "fastapi==0.143.3",
   "prometheus-client==0.26.0",
   "uvicorn==0.52.4",
 ]
